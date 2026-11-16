@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 EN, VI = "README.md", "README.vi.md"
 SWITCH_EN = "**English** · [Tiếng Việt](README.vi.md)"
 SWITCH_VI = "[English](README.md) · **Tiếng Việt**"
@@ -315,7 +315,7 @@ def support_block(repo, vi):
 
 <p align="center"><b>{crypto}:</b><br><code>{BEP20}</code></p>
 
-<p align="center">{note}</p>
+<p align="center"><sub>{note}</sub></p>
 {END}"""
 
 

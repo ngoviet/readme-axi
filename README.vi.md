@@ -154,7 +154,7 @@ cũng được kiểm: `python3 readme_axi.py check` phải đạt trước khi 
 
 <p align="center"><b>Ví tiền mã hoá, chỉ gửi qua mạng BNB Smart Chain (BEP20):</b><br><code>0xcbf0402b232cb24b4d998f09a4884f87b5f74750</code></p>
 
-<p align="center">🇻🇳 VietQR: quét bằng app ngân hàng bất kỳ, nội dung <code>Ung ho readme-axi</code>. Cảm ơn bạn đã giúp dự án tiếp tục phát triển!</p>
+<p align="center"><sub>🇻🇳 VietQR: quét bằng app ngân hàng bất kỳ, nội dung <code>Ung ho readme-axi</code>. Cảm ơn bạn đã giúp dự án tiếp tục phát triển!</sub></p>
 <!-- support:end -->
 
 ## Giấy phép

@@ -155,7 +155,7 @@ repository name). This README is itself checked: `python3 readme_axi.py check` m
 
 <p align="center"><b>Crypto wallet, BNB Smart Chain (BEP20) only:</b><br><code>0xcbf0402b232cb24b4d998f09a4884f87b5f74750</code></p>
 
-<p align="center">🇻🇳 VietQR: scan with any Vietnamese banking app, transfer note <code>Ung ho readme-axi</code>. Thank you for keeping this project alive!</p>
+<p align="center"><sub>🇻🇳 VietQR: scan with any Vietnamese banking app, transfer note <code>Ung ho readme-axi</code>. Thank you for keeping this project alive!</sub></p>
 <!-- support:end -->
 
 ## License
