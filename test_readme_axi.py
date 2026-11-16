@@ -1,6 +1,6 @@
 """Test readme-axi bằng cách chạy CLI thật trên các thư mục mẫu tạm.
 
-Chạy: python -m unittest discover -s readme-axi -v
+Chạy: python -m unittest discover -s . -v
 Chỉ dùng thư viện chuẩn (và git cho drift / tên repo từ origin).
 """
 import os
@@ -178,6 +178,26 @@ class Types(Base):
         self.assertIn("code: USAGE", out)
         code, out = run("check", self.root, "--type", "web")
         self.assertEqual(code, 2)
+
+
+class Parsing(Base):
+    def test_scaffold_writes_lf_line_endings(self):
+        run("scaffold", self.root, "--type", "tool", "--title", "Demo")
+        self.assertNotIn(b"\r\n", (self.root / "README.md").read_bytes())
+
+    def test_long_fence_hides_inner_fence_and_headings(self):
+        run("scaffold", self.root, "--type", "tool", "--title", "Demo")
+        p = self.root / "README.md"
+        text = p.read_text(encoding="utf-8").replace(
+            "## Development\n", "## Development\n\n````md\n```\n## License\n```\n````\n", 1)
+        p.write_bytes(text.encode("utf-8"))
+        code, out = run("check", self.root)
+        self.assertEqual(code, 0, out)
+
+    def test_flag_with_equals_sign(self):
+        run("scaffold", self.root, "--type=tool", "--title=Demo")
+        code, out = run("check", self.root, "--type=tool")
+        self.assertEqual(code, 0, out)
 
 
 class RepoName(Base):

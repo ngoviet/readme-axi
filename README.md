@@ -5,12 +5,17 @@ ngoviet layout and stay in step with each other. One file, Python standard libra
 [TOON](https://toonformat.dev/) for agents; exit code 0 = pass, 1 = issues, 2 = bad usage.
 
 ```bash
-python3 readme_axi.py check [dir]            # layout, switcher line, required sections, EN/VI parity, support block
-python3 readme_axi.py drift [dir] [--strict] # README.md commits not yet ported to README.vi.md
-python3 readme_axi.py support [dir] --write  # insert/refresh the shared "Support the project" block
+# layout, switcher, required sections, EN/VI parity, support block
+python3 readme_axi.py check [dir]
+# README.md commits not yet ported to README.vi.md
+python3 readme_axi.py drift [dir] [--strict]
+# insert or refresh the shared "Support the project" block
+python3 readme_axi.py support [dir] --write
+# skeleton for a public repo, then for a private one
 python3 readme_axi.py scaffold --type ha --title "Name for Home Assistant"
-python3 readme_axi.py scaffold --type ops --title "nas" --private   # private repo skeleton
-python3 readme_axi.py names                  # canonical section names EN -> VI and required order
+python3 readme_axi.py scaffold --type ops --title "nas" --private
+# canonical section names EN -> VI and the required order
+python3 readme_axi.py names
 ```
 
 ## The layout
@@ -19,7 +24,7 @@ Every README starts the same way:
 
 1. `# Title` on the first line, then the marker `<!-- readme-axi type=<type> -->`
    (`<!-- readme-axi type=<type> private -->` in a private repository).
-2. Badges, then the language switcher — `**English** · [Tiếng Việt](README.vi.md)` in README.md,
+2. Badges, then the language switcher: `**English** · [Tiếng Việt](README.vi.md)` in README.md,
    `[English](README.md) · **Tiếng Việt**` in README.vi.md.
 3. One paragraph: what it does, for which device. Optional install button, one-line support callout,
    screenshot.
@@ -73,7 +78,7 @@ jobs:
     uses: ngoviet/.github/.github/workflows/readme.yml@main
 ```
 
-Private repositories run on the self-hosted Woodpecker at https://ci.bepmamnon.com (GitHub Actions
+Private repositories run on the self-hosted Woodpecker at https://ci.vokupt.top (GitHub Actions
 has no minutes left for private repositories). The repository must be enabled there and carry this file:
 
 ```yaml
@@ -103,12 +108,12 @@ steps:
       - python3 /tmp/readme_axi.py drift
 ```
 
-This repository (`.github`) is public, so the download needs no token.
+The published copy lives in the public `ngoviet/.github` repository (`readme-axi/readme_axi.py`), so the download needs no token. After changing this repository, copy `readme_axi.py` there: CI everywhere runs that copy.
 
 ## Tests
 
 ```bash
-python3 -m unittest discover -s readme-axi -v
+python3 -m unittest discover -s . -v
 ```
 
 The tests run the CLI on temporary READMEs (and temporary git repositories for `drift` and the
@@ -135,5 +140,5 @@ Tên repo trong khối Ủng hộ lấy từ `--repo`, rồi git remote `origin`
 worktree hay bản clone tạm vẫn đúng.
 
 CI: repo public gọi workflow dùng chung (GitHub Actions) như trên. Repo private chạy trên Woodpecker tự
-host https://ci.bepmamnon.com với tệp `.woodpecker/readme.yaml` ở phần tiếng Anh: bật repo trong
-Woodpecker, clone đủ lịch sử để `drift` đọc được, tải `readme_axi.py` từ repo public này (không cần token).
+host https://ci.vokupt.top với tệp `.woodpecker/readme.yaml` ở phần tiếng Anh: bật repo trong
+Woodpecker, clone đủ lịch sử để `drift` đọc được, tải `readme_axi.py` từ repo public `ngoviet/.github` (không cần token). Sửa ở repo này xong thì chép `readme_axi.py` sang đó: CI mọi nơi chạy bản ấy.

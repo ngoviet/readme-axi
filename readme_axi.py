@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 EN, VI = "README.md", "README.vi.md"
 SWITCH_EN = "**English** · [Tiếng Việt](README.vi.md)"
 SWITCH_VI = "[English](README.md) · **Tiếng Việt**"
@@ -80,14 +80,25 @@ def read(p):
     return p.read_bytes().decode("utf-8-sig").replace("\r\n", "\n")
 
 
+def label(name, vi):
+    """Tên mục chuẩn theo ngôn ngữ của tệp."""
+    return NAMES[name] if vi else name
+
+
 def headings(text):
-    """(cấp, chữ, số dòng) của các tiêu đề, bỏ qua dòng trong code block."""
+    """(cấp, chữ, số dòng) của các tiêu đề, bỏ qua dòng trong code block.
+
+    Như CommonMark: rào đóng phải cùng ký tự và dài ít nhất bằng rào mở, nên ```` bọc được ``` bên trong.
+    """
     out, fence = [], None
     for i, ln in enumerate(text.split("\n"), 1):
-        m = re.match(r"^\s*(```+|~~~+)", ln)
+        m = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", ln)
         if m:
-            tok = m.group(1)[0] * 3
-            fence = None if fence == tok else (fence or tok)
+            tok, rest = m.groups()
+            if fence is None:
+                fence = tok
+            elif tok[0] == fence[0] and len(tok) >= len(fence) and not rest.strip():
+                fence = None
             continue
         if fence:
             continue
@@ -180,7 +191,7 @@ def check(root, forced_type=None, repo=None):
             if EMOJI.search(t):
                 add(f, "emoji-heading", f"dòng {ln}: {t}")
         names = [t for _, t, _ in h2]
-        want = [NAMES[n] if vi else n for n in REQUIRED.get(rtype, [])]
+        want = [label(n, vi) for n in REQUIRED.get(rtype, [])]
         pos = -1
         for w in want:
             if w not in names:
@@ -191,8 +202,7 @@ def check(root, forced_type=None, repo=None):
                 pos = names.index(w)
         if private:
             continue  # repo private: không ai ngoài chủ đọc, mã không cấp phép MIT
-        lic = NAMES["License"] if vi else "License"
-        sup = NAMES["Support the project"] if vi else "Support the project"
+        lic, sup = label("License", vi), label("Support the project", vi)
         if lic not in names:
             add(f, "section", f"thiếu mục ## {lic}")
         elif names[-1] != lic:
@@ -203,7 +213,10 @@ def check(root, forced_type=None, repo=None):
             blk = text[text.index(START):text.index(END) + len(END)]
             if blk != support_block(repo, vi):
                 add(f, "support", f"khối ## {sup} khác mẫu chung (repo {repo})")
-            if lic in names and text.index(START) > text.index(f"## {lic}"):
+            # so với dòng của tiêu đề thật, không phải chuỗi "## License" đầu tiên (có thể nằm trong code block)
+            start_ln = text[:text.index(START)].count("\n") + 1
+            lic_ln = next((ln for _, t, ln in h2 if t == lic), None)
+            if lic_ln is not None and start_ln > lic_ln:
                 add(f, "order", f"khối Ủng hộ phải đứng trước ## {lic}")
     if EN in heads and VI in heads and len(heads[EN]) != len(heads[VI]):
         add(VI, "parity", f"số mục ## khác nhau: EN {len(heads[EN])}, VI {len(heads[VI])}")
@@ -302,7 +315,7 @@ def support_block(repo, vi):
 
 <p align="center"><b>{crypto}:</b><br><code>{BEP20}</code></p>
 
-<p align="center"><sub>{note}</sub></p>
+<p align="center">{note}</p>
 {END}"""
 
 
@@ -311,7 +324,7 @@ def place_support(text, repo, vi):
     if START in text and END in text:
         return re.sub(re.escape(START) + r".*?" + re.escape(END), lambda _: new, text, flags=re.S), "replaced"
     lines = text.rstrip("\n").split("\n")
-    lic = "## " + (NAMES["License"] if vi else "License")
+    lic = "## " + label("License", vi)
     for i, ln in enumerate(lines):
         if ln.strip() == lic:
             return "\n".join(lines[:i] + new.split("\n") + [""] + lines[i:]) + "\n", "inserted"
@@ -377,11 +390,12 @@ def cmd_scaffold(root, rtype, title, repo, force, private):
         body = [f"# {title}", "", mark, "", SWITCH_VI if vi else SWITCH_EN, "",
                 "Một câu: làm gì, cho thiết bị nào." if vi else "One sentence: what it does, for which device.", ""]
         for n in SCAFFOLD_BODY[rtype]:
-            body += [f"## {NAMES[n] if vi else n}", "", "TODO", ""]
+            body += [f"## {label(n, vi)}", "", "TODO", ""]
         if not private:
-            body += [support_block(repo, vi), "", f"## {NAMES['License'] if vi else 'License'}", "",
+            body += [support_block(repo, vi), "", f"## {label('License', vi)}", "",
                      "[MIT](LICENSE) © Ngô Đức Việt", ""]
-        p.write_text("\n".join(body), encoding="utf-8")
+        # write_bytes: write_text trên Windows tự đổi \n thành \r\n
+        p.write_bytes("\n".join(body).encode("utf-8"))
         made.append({"file": f, "action": "written"})
     print(f"profile: {'private' if private else 'public'}")
     print("\n".join(table("scaffold", ["file", "action"], made)))
@@ -413,7 +427,11 @@ def main(argv):
     bools = {"--write", "--force", "--strict", "--private"}
     while i < len(rest):
         a = rest[i]
-        if a in flags:
+        if a.split("=", 1)[0] in flags and "=" in a:  # --type=ha
+            k, v = a.split("=", 1)
+            opts[k] = v
+            i += 1
+        elif a in flags:
             if i + 1 >= len(rest):
                 die(f"{a} cần giá trị")
             opts[a] = rest[i + 1]
