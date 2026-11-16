@@ -1,6 +1,6 @@
 # readme-axi
 
-<!-- readme-axi type=tool private -->
+<!-- readme-axi type=tool -->
 
 [English](README.md) · **Tiếng Việt**
 
@@ -11,10 +11,10 @@ ngoviet và khớp nhau không. Một tệp, chỉ dùng thư viện chuẩn Pyt
 ## Cài đặt
 
 Không cần cài: `readme_axi.py` là một tệp duy nhất, chạy trên Python 3.9 trở lên, chỉ dùng thư viện
-chuẩn. Chép đi đâu cũng chạy, hoặc tải bản đã phát hành:
+chuẩn. Chép đi đâu cũng chạy, hoặc tải từ nhánh `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ngoviet/.github/main/readme-axi/readme_axi.py -o readme_axi.py
+curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.py -o readme_axi.py
 ```
 
 `drift` và phần lấy tên repo đọc lịch sử git, nên máy cần có `git` trong `PATH`.
@@ -76,7 +76,7 @@ Giấy phép).
 
 ## Cấu hình
 
-Mỗi repo public gọi workflow dùng chung trong `ngoviet/.github` (GitHub Actions):
+Mỗi repo public gọi workflow dùng chung trong repo này (GitHub Actions):
 
 ```yaml
 # .github/workflows/readme.yml
@@ -88,7 +88,7 @@ on:
     paths: [README.md, README.vi.md]
 jobs:
   readme:
-    uses: ngoviet/.github/.github/workflows/readme.yml@main
+    uses: ngoviet/readme-axi/.github/workflows/readme.yml@main
 ```
 
 Repo private chạy trên Woodpecker tự host https://ci.vokupt.top (GitHub Actions hết phút cho repo
@@ -116,13 +116,13 @@ steps:
     image: python:3.13-bookworm # có sẵn python3, git và curl
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
-      - curl -fsSL https://raw.githubusercontent.com/ngoviet/.github/main/readme-axi/readme_axi.py -o /tmp/readme_axi.py
+      - curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.py -o /tmp/readme_axi.py
       - python3 /tmp/readme_axi.py check
       - python3 /tmp/readme_axi.py drift
 ```
 
-Bản phát hành nằm ở repo public `ngoviet/.github` (`readme-axi/readme_axi.py`), nên tải về không cần
-token. Sửa ở repo này xong thì chép `readme_axi.py` sang đó: CI mọi nơi chạy bản ấy.
+Nhánh `main` của repo public này là bản phát hành, nên tải về không cần token. CI mọi nơi chạy đúng tệp
+đó: thay đổi tới mọi repo ngay khi vào `main`.
 
 ## Phát triển
 
@@ -132,3 +132,31 @@ python3 -m unittest discover -s . -v
 
 Test chạy CLI trên các README tạm (và repo git tạm cho `drift` và phần lấy tên repo). Chính README này
 cũng được kiểm: `python3 readme_axi.py check` phải đạt trước khi commit.
+
+<!-- support:start -->
+## Ủng hộ dự án
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/banner.svg" width="720" alt="Built and maintained by one person in Việt Nam">
+</p>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/ngoviet"><img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/btn-coffee.svg" height="56" alt="Buy me a coffee"></a>
+  &nbsp;
+  <a href="https://github.com/sponsors/ngoviet"><img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/btn-sponsors.svg" height="56" alt="GitHub Sponsors"></a>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/vietqr-card.svg" width="300" alt="VietQR — MB Bank — NGO DUC VIET — 911051212">
+  &nbsp;
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/crypto-card.svg" width="300" alt="Crypto — BNB Smart Chain (BEP20) — 0xcbf0402b232cb24b4d998f09a4884f87b5f74750">
+</p>
+
+<p align="center"><b>Ví tiền mã hoá, chỉ gửi qua mạng BNB Smart Chain (BEP20):</b><br><code>0xcbf0402b232cb24b4d998f09a4884f87b5f74750</code></p>
+
+<p align="center">🇻🇳 VietQR: quét bằng app ngân hàng bất kỳ, nội dung <code>Ung ho readme-axi</code>. Cảm ơn bạn đã giúp dự án tiếp tục phát triển!</p>
+<!-- support:end -->
+
+## Giấy phép
+
+[MIT](LICENSE) © Ngô Đức Việt

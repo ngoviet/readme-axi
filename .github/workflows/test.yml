@@ -22,3 +22,13 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Test
         run: python -m unittest discover -s . -v
+
+  readme:
+    # README của chính repo này, chạy bản readme_axi.py đang sửa (không tải bản trên main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 readme_axi.py check
+      - run: python3 readme_axi.py drift

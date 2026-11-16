@@ -1,6 +1,6 @@
 # readme-axi
 
-<!-- readme-axi type=tool private -->
+<!-- readme-axi type=tool -->
 
 **English** · [Tiếng Việt](README.vi.md)
 
@@ -11,10 +11,10 @@ ngoviet layout and stay in step with each other. One file, Python standard libra
 ## Installation
 
 Nothing to install: `readme_axi.py` is a single file that runs on Python 3.9 or later with the standard
-library only. Copy it anywhere, or download the published copy:
+library only. Copy it anywhere, or download it from `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ngoviet/.github/main/readme-axi/readme_axi.py -o readme_axi.py
+curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.py -o readme_axi.py
 ```
 
 `drift` and the repository name read git history, so `git` must be on `PATH`.
@@ -77,7 +77,7 @@ When the repository goes public, drop `private` from the marker; `check` then li
 
 ## Configuration
 
-Each public repository calls the reusable workflow in `ngoviet/.github` (GitHub Actions):
+Each public repository calls the reusable workflow in this repository (GitHub Actions):
 
 ```yaml
 # .github/workflows/readme.yml
@@ -89,7 +89,7 @@ on:
     paths: [README.md, README.vi.md]
 jobs:
   readme:
-    uses: ngoviet/.github/.github/workflows/readme.yml@main
+    uses: ngoviet/readme-axi/.github/workflows/readme.yml@main
 ```
 
 Private repositories run on the self-hosted Woodpecker at https://ci.vokupt.top (GitHub Actions
@@ -117,14 +117,13 @@ steps:
     image: python:3.13-bookworm # python3, git and curl included
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
-      - curl -fsSL https://raw.githubusercontent.com/ngoviet/.github/main/readme-axi/readme_axi.py -o /tmp/readme_axi.py
+      - curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.py -o /tmp/readme_axi.py
       - python3 /tmp/readme_axi.py check
       - python3 /tmp/readme_axi.py drift
 ```
 
-The published copy lives in the public `ngoviet/.github` repository (`readme-axi/readme_axi.py`), so the
-download needs no token. After changing this repository, copy `readme_axi.py` there: CI everywhere runs
-that copy.
+`main` of this public repository is the published copy, so the download needs no token. CI everywhere
+runs that file: a change reaches every repository as soon as it lands on `main`.
 
 ## Development
 
@@ -134,3 +133,31 @@ python3 -m unittest discover -s . -v
 
 The tests run the CLI on temporary READMEs (and temporary git repositories for `drift` and the
 repository name). This README is itself checked: `python3 readme_axi.py check` must pass before a commit.
+
+<!-- support:start -->
+## Support the project
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/banner.svg" width="720" alt="Built and maintained by one person in Việt Nam">
+</p>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/ngoviet"><img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/btn-coffee.svg" height="56" alt="Buy me a coffee"></a>
+  &nbsp;
+  <a href="https://github.com/sponsors/ngoviet"><img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/btn-sponsors.svg" height="56" alt="GitHub Sponsors"></a>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/vietqr-card.svg" width="300" alt="VietQR — MB Bank — NGO DUC VIET — 911051212">
+  &nbsp;
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/crypto-card.svg" width="300" alt="Crypto — BNB Smart Chain (BEP20) — 0xcbf0402b232cb24b4d998f09a4884f87b5f74750">
+</p>
+
+<p align="center"><b>Crypto wallet, BNB Smart Chain (BEP20) only:</b><br><code>0xcbf0402b232cb24b4d998f09a4884f87b5f74750</code></p>
+
+<p align="center">🇻🇳 VietQR: scan with any Vietnamese banking app, transfer note <code>Ung ho readme-axi</code>. Thank you for keeping this project alive!</p>
+<!-- support:end -->
+
+## License
+
+[MIT](LICENSE) © Ngô Đức Việt
