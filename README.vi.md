@@ -1,0 +1,134 @@
+# readme-axi
+
+<!-- readme-axi type=tool private -->
+
+[English](README.md) · **Tiếng Việt**
+
+Kiểm tra `README.md` (tiếng Anh) và `README.vi.md` (tiếng Việt) của một repo có theo khung chung của
+ngoviet và khớp nhau không. Một tệp, chỉ dùng thư viện chuẩn Python, output dạng
+[TOON](https://toonformat.dev/) cho agent; mã thoát 0 = đạt, 1 = có lỗi, 2 = sai cách gọi.
+
+## Cài đặt
+
+Không cần cài: `readme_axi.py` là một tệp duy nhất, chạy trên Python 3.9 trở lên, chỉ dùng thư viện
+chuẩn. Chép đi đâu cũng chạy, hoặc tải bản đã phát hành:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ngoviet/.github/main/readme-axi/readme_axi.py -o readme_axi.py
+```
+
+`drift` và phần lấy tên repo đọc lịch sử git, nên máy cần có `git` trong `PATH`.
+
+## Cách dùng
+
+```bash
+python3 readme_axi.py check [dir]            # khung, dòng chuyển ngôn ngữ, mục bắt buộc, khớp EN/VI, khối Ủng hộ
+python3 readme_axi.py drift [dir] [--strict] # commit sửa README.md mà README.vi.md chưa theo
+python3 readme_axi.py support [dir] --write  # chèn/làm mới khối "Ủng hộ dự án" dùng chung
+python3 readme_axi.py scaffold --type ha --title "Name for Home Assistant"
+python3 readme_axi.py scaffold --type ops --title "nas" --private   # khung cho repo private
+python3 readme_axi.py names                  # tên mục chuẩn Anh -> Việt và thứ tự bắt buộc
+```
+
+## Cách hoạt động
+
+### Khung README
+
+README nào cũng mở đầu giống nhau:
+
+1. `# Tiêu đề` ở dòng đầu, rồi dấu `<!-- readme-axi type=<loại> -->`
+   (`<!-- readme-axi type=<loại> private -->` ở repo private).
+2. Huy hiệu (badge), rồi dòng chuyển ngôn ngữ: `**English** · [Tiếng Việt](README.vi.md)` trong README.md,
+   `[English](README.md) · **Tiếng Việt**` trong README.vi.md.
+3. Một đoạn: làm gì, cho thiết bị nào. Có thể thêm nút cài đặt, một dòng mời ủng hộ, ảnh chụp màn hình.
+
+và, ở repo public, kết thúc giống nhau: khối Ủng hộ dùng chung, rồi `## License` / `## Giấy phép`
+(`[MIT](LICENSE) © Ngô Đức Việt`, thêm "Không liên kết với …" khi dự án dành cho thiết bị của một hãng).
+
+Các mục `##` bắt buộc, đúng thứ tự này (mục khác được chen vào giữa):
+
+| Loại | Bắt buộc |
+|---|---|
+| `ha` tích hợp Home Assistant | Tính năng · Cài đặt · Cấu hình · Thực thể · Xử lý sự cố · Phát triển |
+| `card` card / theme Lovelace | Tính năng · Cài đặt · Cách dùng |
+| `esp32` thiết bị ESPHome | Tính năng · Phần cứng · Bắt đầu nhanh · Home Assistant |
+| `tool` CLI / thư viện | Cài đặt · Cách dùng |
+| `app` web app / dịch vụ | Tính năng · Phát triển · Triển khai |
+| `ops` repo vận hành (script, máy chủ) | Cách dùng · Cấu trúc dự án |
+| `config` repo cấu hình | Cấu trúc dự án · Triển khai |
+| `docs` tài liệu, ghi chép | Cấu trúc dự án |
+
+Hai tệp có cùng số mục `##`, cùng thứ tự, dùng tên chuẩn (`readme_axi.py names`). Tiêu đề không có
+emoji để anchor sạch.
+
+Khối Ủng hộ ghi tên repo. Tên lấy từ `--repo`, rồi git remote `origin`, rồi tên thư mục, nên chạy trong
+worktree hay bản clone tạm vẫn kiểm đúng tên.
+
+### Repo private
+
+Thêm chữ `private` vào dấu ở cả hai tệp: `<!-- readme-axi type=ops private -->`. Repo private vẫn giữ khung
+song ngữ (tiêu đề và dấu, dòng chuyển ngôn ngữ, đoạn giới thiệu, mục theo loại, tên mục chuẩn, khớp EN/VI,
+tiêu đề không emoji, `drift`) nhưng không bắt khối Ủng hộ và mục `## Giấy phép`: không ai ngoài chủ đọc,
+mã không cấp phép MIT. `support --write` không đụng tới repo private.
+
+Khi chuyển repo sang public, bỏ chữ `private` khỏi dấu; `check` sẽ liệt kê phần còn thiếu (khối Ủng hộ,
+Giấy phép).
+
+## Cấu hình
+
+Mỗi repo public gọi workflow dùng chung trong `ngoviet/.github` (GitHub Actions):
+
+```yaml
+# .github/workflows/readme.yml
+name: README
+on:
+  push:
+    paths: [README.md, README.vi.md]
+  pull_request:
+    paths: [README.md, README.vi.md]
+jobs:
+  readme:
+    uses: ngoviet/.github/.github/workflows/readme.yml@main
+```
+
+Repo private chạy trên Woodpecker tự host https://ci.vokupt.top (GitHub Actions hết phút cho repo
+private). Repo phải được bật ở đó và có tệp này:
+
+```yaml
+# .woodpecker/readme.yaml
+when:
+  - event: pull_request
+    path: [README.md, README.vi.md, .woodpecker/readme.yaml]
+  - event: push
+    branch: main
+    path: [README.md, README.vi.md, .woodpecker/readme.yaml]
+  - event: manual
+
+clone:
+  - name: clone
+    image: woodpeckerci/plugin-git
+    settings:
+      partial: false # drift đọc lịch sử git: clone đủ, không shallow
+      depth: 0
+
+steps:
+  - name: readme
+    image: python:3.13-bookworm # có sẵn python3, git và curl
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - curl -fsSL https://raw.githubusercontent.com/ngoviet/.github/main/readme-axi/readme_axi.py -o /tmp/readme_axi.py
+      - python3 /tmp/readme_axi.py check
+      - python3 /tmp/readme_axi.py drift
+```
+
+Bản phát hành nằm ở repo public `ngoviet/.github` (`readme-axi/readme_axi.py`), nên tải về không cần
+token. Sửa ở repo này xong thì chép `readme_axi.py` sang đó: CI mọi nơi chạy bản ấy.
+
+## Phát triển
+
+```bash
+python3 -m unittest discover -s . -v
+```
+
+Test chạy CLI trên các README tạm (và repo git tạm cho `drift` và phần lấy tên repo). Chính README này
+cũng được kiểm: `python3 readme_axi.py check` phải đạt trước khi commit.
