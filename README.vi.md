@@ -24,6 +24,8 @@ curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.
 ```bash
 python3 readme_axi.py check [dir]            # khung, dòng chuyển ngôn ngữ, mục bắt buộc, khớp EN/VI, khối Ủng hộ
 python3 readme_axi.py drift [dir] [--strict] # commit sửa README.md mà README.vi.md chưa theo
+python3 readme_axi.py meta [dir]             # ô About trên GitHub (cần gh): mô tả, topic, giấy phép, ảnh preview
+python3 readme_axi.py social [dir]           # vẽ ảnh social preview 1280x640 (SVG, PNG khi có Edge/Chrome)
 python3 readme_axi.py support [dir] --write  # chèn/làm mới khối "Ủng hộ dự án" dùng chung
 python3 readme_axi.py scaffold --type ha --title "Name for Home Assistant"
 python3 readme_axi.py scaffold --type ops --title "nas" --private   # khung cho repo private
@@ -63,6 +65,36 @@ emoji để anchor sạch.
 
 Khối Ủng hộ ghi tên repo. Tên lấy từ `--repo`, rồi git remote `origin`, rồi tên thư mục, nên chạy trong
 worktree hay bản clone tạm vẫn kiểm đúng tên.
+
+CI của mọi repo tải bản ở `main`, nên đổi mẫu khối Ủng hộ không làm README đang có đỏ lên: khối do
+readme-axi 0.2.x viết vẫn đạt, kèm cảnh báo `support-outdated`, và `support --write` đưa nó lên mẫu hiện
+hành. Khối bị sửa tay vẫn là lỗi.
+
+### Link, ảnh và kích thước
+
+`check` còn đọc link và ảnh nằm ngoài code (khối code có rào, code trong dòng, chú thích `<!-- -->`):
+link Markdown kiểu inline và kiểu tham chiếu, ảnh lồng trong link (badge), các thẻ `<a>`, `<img>`,
+`<source>`, kể cả thẻ viết trên nhiều dòng.
+
+- `link`: link hay ảnh tương đối phải trỏ tới tệp có trong repo, đúng cả chữ hoa chữ thường như trên
+  GitHub và CI Linux. Link web, anchor và đường dẫn trèo ra ngoài repo (`../../issues`, `../repo-khác`)
+  không được kiểm.
+- `alt`: ảnh nào cũng cần chữ thay thế.
+- `size`: README quá 500 KiB, vì GitHub cắt phần thừa.
+
+Ba luật này chỉ cảnh báo, không làm đỏ; `check --strict` thì đỏ cả với cảnh báo. Khối code thụt bốn dấu
+cách (không có rào) chưa được nhận là code.
+
+### Ô About trên GitHub
+
+Ô tìm của GitHub chỉ đọc tên repo, mô tả và topic, trừ khi người tìm gõ thêm `in:readme`; Google lấy
+mô tả làm đoạn tóm tắt của trang. `meta` đọc các trường này qua `gh` và báo: thiếu mô tả hoặc mô tả quá
+120 ký tự, dưới 5 topic hoặc topic sai dạng, GitHub không nhận ra giấy phép, chưa có ảnh social preview,
+đoạn giới thiệu README nói khác mô tả, và dấu `private` không khớp với GitHub. Bản fork và repo hồ sơ
+được bỏ qua luật topic, giấy phép, ảnh preview. Máy không có `gh` thì lệnh báo bỏ qua và thoát 0.
+
+GitHub không có API tải ảnh social preview: `social` vẽ sẵn ảnh (tên, mô tả, topic) để chủ tải lên ở
+Settings > General > Social preview.
 
 ### Repo private
 
@@ -137,8 +169,10 @@ cũng được kiểm: `python3 readme_axi.py check` phải đạt trước khi 
 ## Ủng hộ dự án
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/banner.svg" width="720" alt="Built and maintained by one person in Việt Nam">
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/banner-v2.svg" width="560" alt="Built and maintained by one person in Việt Nam">
 </p>
+
+<p align="center">Một người Việt tự xây dựng và duy trì, miễn phí và mã nguồn mở. Sự ủng hộ của bạn giúp hỗ trợ thêm thiết bị, sửa lỗi nhanh hơn và ra bản mới đều đặn.</p>
 
 <p align="center">
   <a href="https://buymeacoffee.com/ngoviet"><img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/btn-coffee.svg" height="56" alt="Buy me a coffee"></a>
@@ -154,7 +188,7 @@ cũng được kiểm: `python3 readme_axi.py check` phải đạt trước khi 
 
 <p align="center"><b>Ví tiền mã hoá, chỉ gửi qua mạng BNB Smart Chain (BEP20):</b><br><code>0xcbf0402b232cb24b4d998f09a4884f87b5f74750</code></p>
 
-<p align="center"><sub>🇻🇳 VietQR: quét bằng app ngân hàng bất kỳ, nội dung <code>Ung ho readme-axi</code>. Cảm ơn bạn đã giúp dự án tiếp tục phát triển!</sub></p>
+<p align="center">🇻🇳 VietQR: quét bằng app ngân hàng bất kỳ, nội dung <code>Ung ho readme-axi</code>. Cảm ơn bạn đã giúp dự án tiếp tục phát triển!</p>
 <!-- support:end -->
 
 ## Giấy phép

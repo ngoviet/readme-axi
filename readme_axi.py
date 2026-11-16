@@ -4,6 +4,8 @@
 Lệnh:
   readme_axi.py [check] [dir] [--type T] [--repo name]      kiểm tra README.md + README.vi.md
   readme_axi.py drift [dir] [--strict]                      README.md đổi mà README.vi.md chưa theo
+  readme_axi.py meta [dir] [--repo owner/name]              ô About trên GitHub (cần gh): mô tả, topic, giấy phép, ảnh preview
+  readme_axi.py social [dir] [--repo owner/name] [--out f]  vẽ ảnh social preview 1280x640 (SVG, PNG khi có Edge/Chrome)
   readme_axi.py support [dir] [--repo name] [--write]       chèn/thay khối Ủng hộ chung (mặc định chỉ xem)
   readme_axi.py scaffold [dir] --type T --title "..." [--private] [--repo name] [--force]
   readme_axi.py names                                       tên mục chuẩn, mục bắt buộc theo loại
@@ -13,12 +15,18 @@ Tên repo (cho khối Ủng hộ): --repo, rồi git remote origin, rồi tên t
 Mã thoát: 0 = đạt, 1 = có lỗi, 2 = sai cách gọi. Output dạng TOON.
 Chỉ dùng thư viện chuẩn để workflow tải về một tệp là chạy được.
 """
+import json
+import os
+import posixpath
 import re
+import shutil
 import subprocess
 import sys
+from bisect import bisect_right
 from pathlib import Path
+from urllib.parse import unquote
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 EN, VI = "README.md", "README.vi.md"
 SWITCH_EN = "**English** · [Tiếng Việt](README.vi.md)"
 SWITCH_VI = "[English](README.md) · **Tiếng Việt**"
@@ -85,12 +93,12 @@ def label(name, vi):
     return NAMES[name] if vi else name
 
 
-def headings(text):
-    """(cấp, chữ, số dòng) của các tiêu đề, bỏ qua dòng trong code block.
+def prose(text):
+    """(số dòng, dòng) nằm ngoài code block.
 
     Như CommonMark: rào đóng phải cùng ký tự và dài ít nhất bằng rào mở, nên ```` bọc được ``` bên trong.
     """
-    out, fence = [], None
+    fence = None
     for i, ln in enumerate(text.split("\n"), 1):
         m = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", ln)
         if m:
@@ -100,12 +108,187 @@ def headings(text):
             elif tok[0] == fence[0] and len(tok) >= len(fence) and not rest.strip():
                 fence = None
             continue
-        if fence:
-            continue
+        if fence is None:
+            yield i, ln
+
+
+def headings(text):
+    """(cấp, chữ, số dòng) của các tiêu đề, bỏ qua dòng trong code block."""
+    out = []
+    for i, ln in prose(text):
         m = re.match(r"^(#{1,6})\s+(.*?)\s*#*\s*$", ln)
         if m:
             out.append((len(m.group(1)), m.group(2), i))
     return out
+
+
+# ---------- link và ảnh ----------
+# Đọc trên cả văn bản (không theo từng dòng) để bắt thẻ HTML xuống dòng, ảnh lồng trong link (badge) và link
+# kiểu tham chiếu. Code và chú thích HTML được che bằng dấu cách, giữ nguyên vị trí nên số dòng vẫn đúng.
+
+FENCE_ANY = re.compile(r"^(?:\s*>)*\s*(`{3,}|~{3,})(.*)$")   # rào thụt trong list hay nằm trong trích dẫn
+HTML_TAG = re.compile(r"<(img|a|source)\b((?:[^>\"']|\"[^\"]*\"|'[^']*')*)>", re.I)
+ATTR = re.compile(r"""(?<![\w:-])(src|href|srcset|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))""", re.I)
+REF_DEF = re.compile(r"""^ {0,3}\[([^\]\n]+)\]:[ \t]*(<[^>\n]*>|\S+)"""
+                     r"""[ \t]*(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))?[ \t]*$""", re.M)
+REF_IMG = re.compile(r"!\[([^\]\n]*)\]\[([^\]\n]*)\]")
+MAX_BYTES = 500 * 1024  # GitHub cắt README dài hơn 500 KiB
+
+
+def blank(m):
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def mask_code(text):
+    """Bản sao cùng độ dài của text, khối code, code trong dòng và <!-- --> thay bằng dấu cách."""
+    out, fence = [], None
+    for ln in text.split("\n"):
+        m = FENCE_ANY.match(ln)
+        # rào mở bằng ` không được có ` trong info string (```code``` là code trong dòng, không phải rào)
+        opens = m and fence is None and not (m.group(1)[0] == "`" and "`" in m.group(2))
+        closes = m and fence is not None and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+            and not m.group(2).strip()
+        if opens or closes:
+            fence = m.group(1) if opens else None
+            out.append(" " * len(ln))
+        else:
+            out.append(" " * len(ln) if fence else ln)
+    s = re.sub(r"<!--.*?-->", blank, "\n".join(out), flags=re.S)
+    # code trong dòng: dãy ` mở và đóng dài bằng nhau, không vượt qua dòng trống
+    return re.sub(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\1(?!`)", blank, s, flags=re.S)
+
+
+def unescape(url):
+    return re.sub(r"\\([!-/:-@\[-`{-~])", r"\1", url.strip())
+
+
+def destination(s, j):
+    """Đọc phần (đích "tiêu đề") của link inline bắt đầu ngay sau '(' ở vị trí j: (đích, vị trí sau ')') hoặc None."""
+    n = len(s)
+    while j < n and s[j] in " \t\n":
+        j += 1
+    if j < n and s[j] == "<":                      # <đích có dấu cách>
+        k = s.find(">", j)
+        if k < 0 or "\n" in s[j:k]:
+            return None
+        dest, j = s[j + 1:k], k + 1
+    else:                                          # đích thường: ngoặc đơn bên trong phải cân
+        k, depth = j, 0
+        while k < n and s[k] not in " \t\n":
+            if s[k] == "\\":
+                k += 2
+                continue
+            if s[k] == "(":
+                depth += 1
+            elif s[k] == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            k += 1
+        dest, j = s[j:k], k
+    while j < n and s[j] in " \t\n":
+        j += 1
+    if j < n and s[j] in "\"'(":                   # tiêu đề "…", '…' hoặc (…)
+        close = ")" if s[j] == "(" else s[j]
+        k = s.find(close, j + 1)
+        if k < 0:
+            return None
+        j = k + 1
+        while j < n and s[j] in " \t\n":
+            j += 1
+    if j < n and s[j] == ")":
+        return unescape(dest), j + 1
+    return None
+
+
+def md_targets(s):
+    """(vị trí, đích, là ảnh, alt) của link và ảnh Markdown inline; ảnh lồng trong link được đọc cả hai."""
+    stack, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            stack.append((i, i > 0 and s[i - 1] == "!"))
+        elif c == "]" and stack:
+            start, img = stack.pop()
+            if i + 1 < n and s[i + 1] == "(":
+                got = destination(s, i + 2)
+                if got:
+                    yield (start - 1 if img else start), got[0], img, s[start + 1:i].strip() if img else None
+                    i = got[1]
+                    continue
+        i += 1
+
+
+def targets(text):
+    """(số dòng, đích, là ảnh, alt hoặc None) của mọi link và ảnh ngoài code."""
+    s = mask_code(text)
+    found = list(md_targets(s))
+    defs = {}
+    for m in REF_DEF.finditer(s):
+        url = m.group(2)[1:-1] if m.group(2).startswith("<") else m.group(2)
+        defs[re.sub(r"\s+", " ", m.group(1).strip().lower())] = url
+        found.append((m.start(2), unescape(url), False, None))
+    for m in REF_IMG.finditer(s):
+        key = re.sub(r"\s+", " ", (m.group(2) or m.group(1)).strip().lower())
+        found.append((m.start(), "", True, m.group(1).strip()))  # đích đã kiểm ở dòng định nghĩa
+        if key not in defs:
+            found.append((m.start(), f"[{key}]", False, None))   # tham chiếu không có định nghĩa
+    for m in HTML_TAG.finditer(s):
+        tag = m.group(1).lower()
+        attrs = {}
+        for a in ATTR.finditer(m.group(2)):
+            attrs.setdefault(a.group(1).lower(), next(v for v in a.groups()[1:] if v is not None))
+        urls = [attrs.get("src") or attrs.get("href") or ""]
+        urls += [c.split()[0] for c in (attrs.get("srcset") or "").split(",") if c.strip()]
+        alt = (attrs.get("alt") or "").strip() if tag == "img" else None
+        for k, url in enumerate(dict.fromkeys(u for u in urls if u) or [""]):
+            found.append((m.start(), url, tag == "img" and k == 0, alt))
+    lines = [0] + [k + 1 for k, ch in enumerate(s) if ch == "\n"]
+    for pos, url, img, alt in sorted(found, key=lambda x: x[0]):
+        yield bisect_right(lines, pos), url, img, alt
+
+
+_listing = {}
+
+
+def exists_exact(root, rel):
+    """Có tệp hay thư mục rel (đường dẫn /) đúng từng chữ hoa thường, như trên CI Linux và trên GitHub."""
+    cur = Path(root)
+    for part in rel.split("/"):
+        key = str(cur)
+        if key not in _listing:
+            try:
+                _listing[key] = set(os.listdir(cur))
+            except OSError:
+                _listing[key] = set()
+        if part not in _listing[key]:
+            return False
+        cur = cur / part
+    return True
+
+
+def broken(root, url):
+    """True khi url là đường dẫn tương đối tới tệp không có trong repo.
+
+    Không kiểm: link web, anchor (#…), và đường dẫn trèo ra khỏi gốc repo (../../issues là lối viết hợp lệ của
+    GitHub, ../repo-khác trỏ tới thư mục anh em trên máy): cả hai không xác minh được từ trong repo.
+    """
+    if url.startswith("[") and url.endswith("]"):
+        return True   # ảnh kiểu tham chiếu mà không có dòng định nghĩa
+    if not url or url.startswith(("#", "//")) or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url):
+        return False
+    path = unquote(re.split(r"[#?]", url, maxsplit=1)[0]).strip()
+    if not path:
+        return False
+    rel = posixpath.normpath(path.lstrip("/"))
+    if rel == ".":
+        return False
+    if rel == ".." or rel.startswith("../"):
+        return False
+    return not exists_exact(root, rel)
 
 
 def marker(text):
@@ -123,6 +306,21 @@ def is_private(root):
     return False
 
 
+def origin_url(root):
+    try:
+        r = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"],
+                           capture_output=True, text=True, encoding="utf-8")
+    except OSError:
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def repo_slug(root):
+    """owner/name từ origin trên github.com (https hoặc ssh), hoặc None."""
+    m = re.search(r"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", origin_url(root))
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
 def repo_name(root, given=None):
     """(tên, nguồn): --repo, rồi tên repo trong git remote origin, rồi tên thư mục.
 
@@ -130,12 +328,7 @@ def repo_name(root, given=None):
     """
     if given:
         return given, "flag"
-    try:
-        r = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"],
-                           capture_output=True, text=True, encoding="utf-8")
-        url = r.stdout.strip() if r.returncode == 0 else ""
-    except OSError:
-        url = ""
+    url = origin_url(root)
     name = re.split(r"[/:\\]", url.rstrip("/\\"))[-1] if url else ""
     if name.endswith(".git"):
         name = name[:-4]
@@ -146,11 +339,17 @@ def repo_name(root, given=None):
 
 # ---------- check ----------
 
-def check(root, forced_type=None, repo=None):
+# chỉ cảnh báo, --strict mới làm đỏ: luật mới (link, alt, size) và khối Ủng hộ theo mẫu cũ
+WARN_RULES = {"link", "alt", "size", "support-outdated"}
+
+
+def check(root, forced_type=None, repo=None, strict=False):
+    """(loại, private, mục ##, danh sách lỗi); mỗi lỗi có level "error" hoặc "warning"."""
     issues = []
 
     def add(f, rule, detail):
-        issues.append({"file": f, "rule": rule, "detail": detail})
+        level = "warning" if rule in WARN_RULES and not strict else "error"
+        issues.append({"file": f, "rule": rule, "detail": detail, "level": level})
 
     files = {}
     for f in (EN, VI):
@@ -190,6 +389,16 @@ def check(root, forced_type=None, repo=None):
         for _, t, ln in hs:
             if EMOJI.search(t):
                 add(f, "emoji-heading", f"dòng {ln}: {t}")
+        size = len(text.encode("utf-8"))
+        if size > MAX_BYTES:
+            add(f, "size", f"{size // 1024} KiB, GitHub chỉ hiện {MAX_BYTES // 1024} KiB đầu")
+        for ln, url, img, alt in targets(text):
+            if url.startswith("[") and url.endswith("]"):
+                add(f, "link", f"dòng {ln}: tham chiếu {url} chưa có dòng định nghĩa")
+            elif broken(root, url):
+                add(f, "link", f"dòng {ln}: {url} không có trong repo")
+            if img and not alt:
+                add(f, "alt", f"dòng {ln}: ảnh {url or '?'} thiếu chữ thay thế")
         names = [t for _, t, _ in h2]
         want = [label(n, vi) for n in REQUIRED.get(rtype, [])]
         pos = -1
@@ -212,7 +421,10 @@ def check(root, forced_type=None, repo=None):
         else:
             blk = text[text.index(START):text.index(END) + len(END)]
             if blk != support_block(repo, vi):
-                add(f, "support", f"khối ## {sup} khác mẫu chung (repo {repo})")
+                if any(blk == support_block(repo, vi, era) for era in LEGACY_ERAS):
+                    add(f, "support-outdated", f"khối ## {sup} theo mẫu cũ, vẫn được chấp nhận")
+                else:
+                    add(f, "support", f"khối ## {sup} khác mẫu chung (repo {repo})")
             # so với dòng của tiêu đề thật, không phải chuỗi "## License" đầu tiên (có thể nằm trong code block)
             start_ln = text[:text.index(START)].count("\n") + 1
             lic_ln = next((ln for _, t, ln in h2 if t == lic), None)
@@ -223,11 +435,13 @@ def check(root, forced_type=None, repo=None):
     return rtype, private, heads, issues
 
 
-def cmd_check(root, forced_type, repo_opt=None):
+def cmd_check(root, forced_type, repo_opt=None, strict=False):
     if forced_type and forced_type not in REQUIRED:
         die(f"--type phải là một trong {TYPES.replace('|', ', ')}")
     repo, source = repo_name(root, repo_opt)
-    rtype, private, heads, issues = check(root, forced_type, repo)
+    rtype, private, heads, found = check(root, forced_type, repo, strict)
+    issues = [i for i in found if i["level"] == "error"]
+    warnings = [i for i in found if i["level"] == "warning"]
     print(f"repo: {toon(repo)}")
     print(f"repo_from: {source}")
     print(f"type: {rtype or 'unknown'}")
@@ -236,23 +450,32 @@ def cmd_check(root, forced_type, repo_opt=None):
     rows = [{"n": i + 1, "en": en[i][1] if i < len(en) else "-", "vi": vi[i][1] if i < len(vi) else "-"}
             for i in range(max(len(en), len(vi)))]
     print("\n".join(table("sections", ["n", "en", "vi"], rows)) if rows else "sections: 0 results")
-    print(f"result: {'pass' if not issues else 'fail'}, {len(issues)} issues")
+    print(f"result: {'pass' if not issues else 'fail'}, {len(issues)} issues, {len(warnings)} warnings")
     if issues:
         print("\n".join(table("issues", ["file", "rule", "detail"], issues)))
-        hints = []
-        if any(i["rule"] == "support" for i in issues):
-            hints.append("Run `readme_axi.py support --write` to insert the shared support block "
-                         "(private repo: add `private` to the marker instead)")
-        if any(i["rule"] == "type-marker" for i in issues):
-            hints.append(f"Marker line: <!-- readme-axi type=<{TYPES}> --> (append ` private` for a private repo)")
-        if any(i["rule"] == "missing" for i in issues):
-            hints.append(f"Run `readme_axi.py scaffold --type <{TYPES}> --title \"<name>\" [--private]` for a skeleton")
+    if warnings:
+        print("\n".join(table("warnings", ["file", "rule", "detail"], warnings)))
+    hints = []
+    if any(i["rule"] == "support" for i in issues):
+        hints.append("Run `readme_axi.py support --write` to insert the shared support block "
+                     "(private repo: add `private` to the marker instead)")
+    if any(i["rule"] == "support-outdated" for i in found):
+        hints.append("Run `readme_axi.py support --write` to move the support block to the current template")
+    if any(i["rule"] == "type-marker" for i in issues):
+        hints.append(f"Marker line: <!-- readme-axi type=<{TYPES}> --> (append ` private` for a private repo)")
+    if any(i["rule"] == "link" for i in found):
+        hints.append("Relative links resolve from the repo root: add the missing file or fix the path")
+    if any(i["rule"] == "missing" for i in issues):
+        hints.append(f"Run `readme_axi.py scaffold --type <{TYPES}> --title \"<name>\" [--private]` for a skeleton")
+    if issues:
         hints.append("Section names (EN -> VI) are listed by `readme_axi.py names`")
-        print(f"help[{len(hints)}]:")
-        for h in hints:
-            print(f"  {h}")
-    else:
-        print("help[1]:\n  Run `readme_axi.py drift` to see whether README.vi.md lags behind README.md")
+    if warnings:
+        hints.append("Warnings do not fail the check; `check --strict` fails on them too")
+    if not found:
+        hints.append("Run `readme_axi.py drift` to see whether README.vi.md lags behind README.md")
+    print(f"help[{len(hints)}]:")
+    for h in hints:
+        print(f"  {h}")
     return 1 if issues else 0
 
 
@@ -283,23 +506,317 @@ def cmd_drift(root, strict):
     return 0
 
 
+# ---------- meta ----------
+# Ô tìm của GitHub mặc định chỉ đọc tên repo, mô tả và topics (không đọc README), Google lấy mô tả làm
+# tiêu đề và tóm tắt trang repo: nên kiểm cả ô About, không chỉ tệp README.
+
+DESC_MAX = 120          # standard-readme: mô tả ngắn dưới 120 ký tự
+TOPICS_MIN, TOPICS_MAX = 5, 20
+TOPIC_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$")
+GH_FIELDS = "description,repositoryTopics,licenseInfo,usesCustomOpenGraphImage,visibility,isFork"
+
+
+def intro(text):
+    """Đoạn giới thiệu: đoạn chữ đầu tiên sau dòng chuyển ngôn ngữ.
+
+    Bỏ qua code block, tiêu đề, badge, ảnh, trích dẫn, bảng và dòng chỉ có thẻ HTML; dòng có chữ thì giữ chữ,
+    bỏ thẻ (đoạn mở đầu bằng <b>Tên</b> vẫn là đoạn giới thiệu).
+    """
+    sw = next((i for i, ln in enumerate(text.split("\n"), 1) if SWITCH_EN in ln or SWITCH_VI in ln), 0)
+    para, prev = [], None
+    for i, ln in prose(text):
+        if i <= sw:
+            continue
+        if para and i != prev + 1:
+            break  # giữa hai dòng có code block (prose() đã bỏ): hết đoạn
+        prev = i
+        s = ln.strip()
+        visible = re.sub(r"<[^>]*>", "", s).strip()
+        if not visible or s.startswith(("#", "![", "[![", ">", "|", "<!--")):
+            if para:
+                break
+            continue
+        para.append(visible)
+    s = " ".join(para)
+    s = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", s)
+    return re.sub(r"[`*_]", "", s)
+
+
+def words(s):
+    return set(re.findall(r"[^\W_]{4,}", s.lower()))
+
+
+def gh_meta(slug):
+    """(ô About, lỗi): (dict, None) khi đọc được, (None, None) khi máy không có gh, (None, "lỗi") khi gh lỗi.
+
+    READMEAXI_GH_JSON thay gh trong test; tệp đó có khoá "__gh_error__" thì giả lập gh lỗi.
+    """
+    fake = os.environ.get("READMEAXI_GH_JSON")
+    if fake:
+        data = json.loads(Path(fake).read_text(encoding="utf-8"))
+        return (None, data["__gh_error__"]) if "__gh_error__" in data else (data, None)
+    try:
+        r = subprocess.run(["gh", "repo", "view", slug, "--json", GH_FIELDS],
+                           capture_output=True, text=True, encoding="utf-8")
+    except OSError:
+        return None, None
+    if r.returncode:
+        return None, r.stderr.strip()[:200] or f"gh exited {r.returncode}"
+    return json.loads(r.stdout), None
+
+
+def cmd_meta(root, slug):
+    meta, err = gh_meta(slug)
+    if err:
+        die(f"gh repo view {slug}: {err}", 1, "Run `gh auth status`, or check --repo owner/name")
+    print(f"repo: {toon(slug)}")
+    if meta is None:
+        print("result: skipped, gh is not installed")
+        print("help[1]:\n  Install GitHub CLI (https://cli.github.com) and run `gh auth login`, then rerun")
+        return 0
+    issues = []
+
+    def add(rule, detail):
+        issues.append({"field": rule, "detail": detail})
+
+    private = meta.get("visibility", "").upper() == "PRIVATE"
+    desc = (meta.get("description") or "").strip()
+    topics = [t["name"] if isinstance(t, dict) else t for t in meta.get("repositoryTopics") or []]
+    print(f"visibility: {'private' if private else 'public'}")
+    print(f"fork: {'yes' if meta.get('isFork') else 'no'}")
+    print(f"description: {toon(desc) if desc else '(none)'}")
+    print(f"description_chars: {len(desc)}")
+    print(f"topics[{len(topics)}]: {','.join(topics)}" if topics else "topics: 0 results")
+
+    marked = is_private(root)
+    if (root / EN).exists() and marked != private:
+        add("visibility", f"dấu README ghi {'private' if marked else 'public'} nhưng GitHub là "
+                          f"{'private' if private else 'public'}")
+    if not desc:
+        add("description", "trống: ô tìm GitHub và Google đều đọc trường này")
+    elif len(desc) > DESC_MAX:
+        add("description", f"{len(desc)} ký tự, nên dưới {DESC_MAX}")
+    dw = words(desc)
+    intros = [words(intro(read(root / f))) for f in (EN, VI) if (root / f).exists()]
+    if dw and intros:
+        # mô tả có thể viết tiếng Anh hay tiếng Việt: so với bản nào khớp hơn
+        hit = max(len(dw & iw) for iw in intros) / len(dw)
+        if hit < 0.5:
+            add("intro", f"đoạn giới thiệu README chỉ chứa {hit:.0%} từ của mô tả: hai nơi nên nói cùng một ý")
+    owner, name = slug.split("/", 1)
+    # fork: topic và giấy phép thuộc repo gốc; repo hồ sơ (owner/owner): GitHub không hiện topic hay preview
+    if not private and not meta.get("isFork") and owner.lower() != name.lower():
+        if len(topics) < TOPICS_MIN:
+            add("topics", f"{len(topics)} topic, cần ít nhất {TOPICS_MIN} (tối đa {TOPICS_MAX})")
+        elif len(topics) > TOPICS_MAX:
+            add("topics", f"{len(topics)} topic, GitHub chỉ cho {TOPICS_MAX}")
+        for t in topics:
+            if not TOPIC_RE.match(t):
+                add("topics", f"{t}: chỉ chữ thường, số, gạch nối, tối đa 50 ký tự")
+        if not meta.get("licenseInfo"):
+            add("license", "GitHub không nhận ra giấy phép: thêm tệp LICENSE đúng văn bản chuẩn")
+        if not meta.get("usesCustomOpenGraphImage"):
+            add("social-preview", "chưa có ảnh social preview: link chia sẻ lên chat, mạng xã hội chỉ hiện thẻ chung")
+    print(f"result: {'pass' if not issues else 'fail'}, {len(issues)} issues")
+    if issues:
+        print("\n".join(table("issues", ["field", "detail"], issues)))
+        hints = []
+        if any(i["field"] in ("description", "topics") for i in issues):
+            hints.append(f"Edit them with `gh repo edit {slug} --description \"...\" --add-topic <topic>`")
+        if any(i["field"] == "social-preview" for i in issues):
+            hints.append("Run `readme_axi.py social` to render a 1280x640 image, then upload it in "
+                         "Settings > General > Social preview")
+        if any(i["field"] == "intro" for i in issues):
+            hints.append("Make the first paragraph of README.md and the GitHub description tell the same story")
+        print(f"help[{len(hints)}]:")
+        for h in hints:
+            print(f"  {h}")
+    return 1 if issues else 0
+
+
+# ---------- social ----------
+# GitHub không có API tải ảnh social preview: lệnh này chỉ vẽ ảnh, chủ tải lên trong Settings.
+
+SOCIAL_W, MARGIN = 1280, 96
+TEXT_W = SOCIAL_W - 2 * MARGIN
+
+
+def text_px(s, size):
+    """Ước độ rộng (px) của chữ không chân ở cỡ size; hơi rộng hơn thật để chữ không tràn khung."""
+    w = 0.0
+    for ch in s:
+        if ch in " il.,:;'!|":
+            w += 0.30
+        elif ch in "fjrtI()[]{}-/\\\"":
+            w += 0.38
+        elif ch in "mwMW@%":
+            w += 0.90
+        elif ch.isupper() or ch.isdigit():
+            w += 0.66
+        else:
+            w += 0.56
+    return w * size
+
+
+def ellipsize(s, size, width):
+    """s kết thúc bằng … và vừa width."""
+    s = s.rstrip("…").rstrip(" ,.;:")
+    while s and text_px(s + "…", size) > width:
+        s = s[:-1].rstrip(" ,.;:")
+    return s + "…"
+
+
+def fit(s, size, width):
+    """Giữ nguyên s nếu vừa width, không thì cắt và thêm …"""
+    return s if text_px(s, size) <= width else ellipsize(s, size, width)
+
+
+def wrap(s, size, width, lines):
+    """Ngắt s theo độ rộng ước tính thành tối đa `lines` dòng; dòng cuối thêm … nếu còn chữ."""
+    out, cur = [], ""
+    for w in s.split():
+        if cur and text_px(f"{cur} {w}", size) > width:
+            out.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        out.append(cur)
+    out = [fit(x, size, width) for x in out]   # một từ dài hơn cả dòng
+    if len(out) > lines:
+        out = out[:lines]
+        out[-1] = ellipsize(out[-1], size, width)
+    return out
+
+
+def social_svg(slug, desc, topics):
+    esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    owner, name = slug.split("/", 1)
+    size = next((z for z in (88, 68, 52) if text_px(name, z) <= TEXT_W), 52)
+    name = fit(name, size, TEXT_W)
+    font = "'Be Vietnam Pro','Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
+    desc_lines = wrap(desc, 40, TEXT_W, 3)
+    y0 = 330 if desc_lines else 300
+    body = "".join(f'<text x="{MARGIN}" y="{y0 + i * 54}" font-size="40" fill="#c9d4e5">{esc(t)}</text>'
+                   for i, t in enumerate(desc_lines))
+    chips, x = [], MARGIN
+    for t in topics[:5]:
+        label_ = fit(t, 24, TEXT_W - 32)
+        w = round(32 + text_px(label_, 24))
+        if x + w > SOCIAL_W - MARGIN:
+            break
+        chips.append(f'<rect x="{x}" y="520" width="{w}" height="44" rx="22" fill="#12324a"/>'
+                     f'<text x="{x + w / 2}" y="550" font-size="24" fill="#7fd8f5" text-anchor="middle">{esc(label_)}</text>')
+        x += w + 12
+    foot = fit(f"Built in Việt Nam · github.com/{slug}", 24, TEXT_W)
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" font-family="{font}">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d1b2e"/><stop offset="1" stop-color="#081018"/></linearGradient></defs>
+<rect width="1280" height="640" fill="url(#g)"/>
+<rect x="0" y="0" width="1280" height="10" fill="#2bb5d8"/>
+<text x="96" y="150" font-size="34" fill="#8a9bb3">{esc(owner)} /</text>
+<text x="96" y="{150 + size + 10}" font-size="{size}" font-weight="700" fill="#f2f6fb">{esc(name)}</text>
+{body}
+{''.join(chips)}
+<text x="1184" y="604" font-size="24" fill="#8a9bb3" text-anchor="end">{esc(foot)}</text>
+</svg>"""
+
+
+def find_browser():
+    if "READMEAXI_BROWSER" in os.environ:          # test: "" = không có trình duyệt
+        return os.environ["READMEAXI_BROWSER"] or None
+    for b in ("msedge", "chrome", "google-chrome", "chromium", "chromium-browser"):
+        if shutil.which(b):
+            return shutil.which(b)
+    for p in (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+              r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+              r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"):
+        if Path(p).exists():
+            return p
+    return None
+
+
+def cmd_social(root, slug, out):
+    target = Path(out) if out else Path("social-preview.png")
+    if target.suffix.lower() not in (".png", ".svg"):
+        die(f"--out phải là tệp .png hoặc .svg: {target}", 2, "Pass --out social-preview.png")
+    if not target.parent.is_dir():
+        die(f"thư mục đích không có: {target.parent}", 2, "Create the folder first, or pick another --out")
+    meta, err = gh_meta(slug)                       # gh thiếu hay lỗi: vẫn vẽ được từ README
+    desc = ((meta or {}).get("description") or "").strip()
+    source = "github" if desc else "readme intro" + (f" (gh failed: {err[:80]})" if err else "")
+    if not desc and (root / EN).exists():
+        desc = intro(read(root / EN))
+    topics = [t["name"] if isinstance(t, dict) else t for t in (meta or {}).get("repositoryTopics") or []]
+    svg = target.with_suffix(".svg")
+    svg.write_bytes(social_svg(slug, desc, topics).encode("utf-8"))
+    rows = [{"file": str(svg), "action": "written"}]
+    if target.suffix.lower() == ".png":
+        png = target
+        png.unlink(missing_ok=True)                 # "written" chỉ khi trình duyệt vừa ghi tệp mới
+        browser = find_browser()
+        if not browser:
+            rows.append({"file": str(png), "action": "skipped (no Edge/Chrome)"})
+        else:
+            try:
+                r = subprocess.run([browser, "--headless", "--disable-gpu", "--hide-scrollbars",
+                                    "--window-size=1280,640", f"--screenshot={png.resolve()}",
+                                    svg.resolve().as_uri()], capture_output=True, text=True, timeout=60)
+                ok = r.returncode == 0 and png.exists() and png.stat().st_size > 0
+            except (OSError, subprocess.TimeoutExpired):
+                ok = False
+            rows.append({"file": str(png), "action": "written" if ok else "failed"})
+    print(f"repo: {toon(slug)}")
+    print(f"description_from: {toon(source)}")
+    print("\n".join(table("social", ["file", "action"], rows)))
+    done = rows[-1]["action"] == "written"
+    if done:
+        print("help[2]:\n  Upload the PNG in GitHub: Settings > General > Social preview > Edit (no API for this)"
+              "\n  The image is 1280x640, the size GitHub recommends; keep the PNG under 1 MB")
+    else:
+        print("help[1]:\n  No PNG: open the SVG in a browser and save a 1280x640 PNG, or install Edge/Chrome and rerun")
+    return 0 if done else 1
+
+
 # ---------- support ----------
 
-def support_block(repo, vi):
+CURRENT_ERA = "0.3"
+# mẫu khối Ủng hộ cũ vẫn được chấp nhận (cảnh báo support-outdated): main là bản phát hành cho mọi repo,
+# đổi mẫu mà không nhận mẫu cũ thì README của mọi repo public đỏ cùng lúc (gặp 16/11/2026 ở bản 0.2.1)
+LEGACY_ERAS = ("0.2.0", "0.2.1")
+
+
+def support_block(repo, vi, era=CURRENT_ERA):
+    """Khối Ủng hộ theo mẫu hiện hành, hoặc theo mẫu cũ era (để check còn nhận README chưa làm mới)."""
     if vi:
         title, note = "## Ủng hộ dự án", (f"🇻🇳 VietQR: quét bằng app ngân hàng bất kỳ, nội dung <code>Ung ho {repo}</code>. "
                                           "Cảm ơn bạn đã giúp dự án tiếp tục phát triển!")
         crypto = "Ví tiền mã hoá, chỉ gửi qua mạng BNB Smart Chain (BEP20)"
+        pays = "Một người Việt tự xây dựng và duy trì, miễn phí và mã nguồn mở. Sự ủng hộ của bạn giúp hỗ trợ thêm " \
+               "thiết bị, sửa lỗi nhanh hơn và ra bản mới đều đặn."
     else:
         title, note = "## Support the project", (f"🇻🇳 VietQR: scan with any Vietnamese banking app, transfer note "
                                                  f"<code>Ung ho {repo}</code>. Thank you for keeping this project alive!")
         crypto = "Crypto wallet, BNB Smart Chain (BEP20) only"
+        pays = "Free and open source. Your support pays for new device support, faster fixes and every release."
+    if era == CURRENT_ERA:
+        # banner-v2 chỉ còn tiêu đề chữ to (đọc được trên điện thoại); câu giải thích là chữ thật, theo ngôn ngữ tệp.
+        # Tên tệp mới để README chưa làm mới vẫn hiện banner.svg cũ, đủ các dòng phụ vẽ trong ảnh.
+        banner = f"""<p align="center">
+  <img src="{ASSET}/banner-v2.svg" width="560" alt="Built and maintained by one person in Việt Nam">
+</p>
+
+<p align="center">{pays}</p>"""
+    else:
+        banner = f"""<p align="center">
+  <img src="{ASSET}/banner.svg" width="720" alt="Built and maintained by one person in Việt Nam">
+</p>"""
+    if era == "0.2.0":      # 0.2.0 và 0.2.2: ghi chú trong <sub>
+        note = f"<sub>{note}</sub>"
     return f"""{START}
 {title}
 
-<p align="center">
-  <img src="{ASSET}/banner.svg" width="720" alt="Built and maintained by one person in Việt Nam">
-</p>
+{banner}
 
 <p align="center">
   <a href="https://buymeacoffee.com/ngoviet"><img src="{ASSET}/btn-coffee.svg" height="56" alt="Buy me a coffee"></a>
@@ -315,7 +832,7 @@ def support_block(repo, vi):
 
 <p align="center"><b>{crypto}:</b><br><code>{BEP20}</code></p>
 
-<p align="center"><sub>{note}</sub></p>
+<p align="center">{note}</p>
 {END}"""
 
 
@@ -399,7 +916,12 @@ def cmd_scaffold(root, rtype, title, repo, force, private):
         made.append({"file": f, "action": "written"})
     print(f"profile: {'private' if private else 'public'}")
     print("\n".join(table("scaffold", ["file", "action"], made)))
-    print("help[1]:\n  Fill the TODO sections, then run `readme_axi.py check`")
+    hints = ["Fill the TODO sections, then run `readme_axi.py check`"]
+    if not private and not (root / "LICENSE").exists():
+        hints.append("Add a LICENSE file: the License section links to it")
+    print(f"help[{len(hints)}]:")
+    for h in hints:
+        print(f"  {h}")
     return 0
 
 
@@ -419,11 +941,11 @@ def main(argv):
     if "--help" in argv or "-h" in argv:
         print(__doc__.strip())
         return 0
-    cmds = {"check", "drift", "support", "scaffold", "names"}
+    cmds = {"check", "drift", "meta", "social", "support", "scaffold", "names"}
     cmd = argv[0] if argv and argv[0] in cmds else "check"
     rest = argv[1:] if argv and argv[0] in cmds else argv
     opts, pos, i = {}, [], 0
-    flags = {"--type", "--title", "--repo"}
+    flags = {"--type", "--title", "--repo", "--out"}
     bools = {"--write", "--force", "--strict", "--private"}
     while i < len(rest):
         a = rest[i]
@@ -448,11 +970,23 @@ def main(argv):
     if not root.is_dir():
         die(f"không phải thư mục: {root}")
     if cmd == "check":
-        return cmd_check(root, opts.get("--type"), opts.get("--repo"))
+        return cmd_check(root, opts.get("--type"), opts.get("--repo"), opts.get("--strict", False))
     if cmd == "drift":
         return cmd_drift(root, opts.get("--strict", False))
     if cmd == "names":
         return cmd_names()
+    if cmd in ("meta", "social"):
+        slug, own = opts.get("--repo"), repo_slug(root)
+        if slug and "/" not in slug:  # chỉ tên: lấy chủ repo từ origin
+            if not own:
+                die(f"--repo {slug}: thiếu chủ repo, origin không trỏ tới github.com", 2, "Pass --repo owner/name")
+            slug = f"{own.split('/')[0]}/{slug}"
+        slug = slug or own
+        if not slug:
+            die("không biết repo GitHub nào: origin không trỏ tới github.com", 2, "Pass --repo owner/name")
+        if cmd == "meta":
+            return cmd_meta(root, slug)
+        return cmd_social(root, slug, opts.get("--out"))
     repo = repo_name(root, opts.get("--repo"))[0]
     if cmd == "support":
         return cmd_support(root, repo, opts.get("--write", False))

@@ -24,6 +24,8 @@ curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.
 ```bash
 python3 readme_axi.py check [dir]            # layout, switcher line, required sections, EN/VI parity, support block
 python3 readme_axi.py drift [dir] [--strict] # README.md commits not yet ported to README.vi.md
+python3 readme_axi.py meta [dir]             # GitHub About box (needs gh): description, topics, license, preview
+python3 readme_axi.py social [dir]           # render a 1280x640 social preview (SVG, PNG with Edge/Chrome)
 python3 readme_axi.py support [dir] --write  # insert/refresh the shared "Support the project" block
 python3 readme_axi.py scaffold --type ha --title "Name for Home Assistant"
 python3 readme_axi.py scaffold --type ops --title "nas" --private   # private repo skeleton
@@ -64,6 +66,37 @@ Both files have the same number of `##` sections, in the same order, with the ca
 
 The support block carries the repository name. It comes from `--repo`, then from the `origin` remote,
 then from the folder name, so a worktree or a temporary clone checks against the right name.
+
+`main` is what every repository's CI downloads, so a new support template never turns existing READMEs
+red: a block written by readme-axi 0.2.x still passes with a `support-outdated` warning, and
+`support --write` moves it to the current template. A block edited by hand is still an error.
+
+### Links, images and size
+
+`check` also reads the links and images outside code (fenced blocks, inline code and `<!-- -->`
+comments): Markdown inline and reference-style links, images nested in links (badges), and the
+`<a>`, `<img>` and `<source>` tags, also when a tag spans several lines.
+
+- `link`: a relative link or image must point to a file in the repository, letter case included, as
+  on GitHub and on Linux CI. Web links, anchors and paths that climb out of the repository
+  (`../../issues`, `../other-repo`) are not checked.
+- `alt`: every image needs alt text.
+- `size`: a README over 500 KiB, because GitHub cuts the rest off.
+
+These three rules warn without failing; `check --strict` fails on warnings too. Indented code blocks
+(four spaces, no fence) are not recognised as code.
+
+### The GitHub About box
+
+GitHub search looks only at the repository name, description and topics unless the reader adds
+`in:readme`, and Google uses the description as the page summary. `meta` reads them with `gh` and
+reports a missing description or one over 120 characters, fewer than 5 topics or a badly formed one, no
+license GitHub can detect, no social preview image, a README intro that tells a different story from the
+description, and a `private` marker that disagrees with GitHub. Forks and the profile repository skip the
+topic, license and preview rules. Without `gh` the command says so and exits 0.
+
+GitHub has no API for the social preview image: `social` renders one (name, description, topics) for
+you to upload in Settings > General > Social preview.
 
 ### Private repositories
 
@@ -138,8 +171,10 @@ repository name). This README is itself checked: `python3 readme_axi.py check` m
 ## Support the project
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/banner.svg" width="720" alt="Built and maintained by one person in Việt Nam">
+  <img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/banner-v2.svg" width="560" alt="Built and maintained by one person in Việt Nam">
 </p>
+
+<p align="center">Free and open source. Your support pays for new device support, faster fixes and every release.</p>
 
 <p align="center">
   <a href="https://buymeacoffee.com/ngoviet"><img src="https://raw.githubusercontent.com/ngoviet/.github/main/assets/support/btn-coffee.svg" height="56" alt="Buy me a coffee"></a>
@@ -155,7 +190,7 @@ repository name). This README is itself checked: `python3 readme_axi.py check` m
 
 <p align="center"><b>Crypto wallet, BNB Smart Chain (BEP20) only:</b><br><code>0xcbf0402b232cb24b4d998f09a4884f87b5f74750</code></p>
 
-<p align="center"><sub>🇻🇳 VietQR: scan with any Vietnamese banking app, transfer note <code>Ung ho readme-axi</code>. Thank you for keeping this project alive!</sub></p>
+<p align="center">🇻🇳 VietQR: scan with any Vietnamese banking app, transfer note <code>Ung ho readme-axi</code>. Thank you for keeping this project alive!</p>
 <!-- support:end -->
 
 ## License
