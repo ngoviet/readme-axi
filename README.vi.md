@@ -94,7 +94,9 @@ mô tả làm đoạn tóm tắt của trang. `meta` đọc các trường này 
 được bỏ qua luật topic, giấy phép, ảnh preview. Máy không có `gh` thì lệnh báo bỏ qua và thoát 0.
 
 GitHub không có API tải ảnh social preview: `social` vẽ sẵn ảnh (tên, mô tả, topic) để chủ tải lên ở
-Settings > General > Social preview.
+Settings > General > Social preview. GitHub trả topic gần như theo a-b-c, nên ảnh chọn tối đa năm topic
+theo mô tả: topic có trong mô tả đứng trước, theo thứ tự đọc; topic na ná nhau (`homeassistant` cạnh
+`home-assistant`) bị bỏ.
 
 ### Repo private
 

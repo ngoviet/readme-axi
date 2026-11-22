@@ -671,8 +671,8 @@ def fit(s, size, width):
     return s if text_px(s, size) <= width else ellipsize(s, size, width)
 
 
-def wrap(s, size, width, lines):
-    """Ngắt s theo độ rộng ước tính thành tối đa `lines` dòng; dòng cuối thêm … nếu còn chữ."""
+def greedy_lines(s, size, width):
+    """Ngắt tham lam: mỗi dòng nhận thêm từ cho tới khi vượt width."""
     out, cur = [], ""
     for w in s.split():
         if cur and text_px(f"{cur} {w}", size) > width:
@@ -682,10 +682,64 @@ def wrap(s, size, width, lines):
             cur = f"{cur} {w}".strip()
     if cur:
         out.append(cur)
+    return out
+
+
+def wrap(s, size, width, lines):
+    """Ngắt s theo độ rộng ước tính thành tối đa `lines` dòng; dòng cuối thêm … nếu còn chữ.
+
+    Chữ vừa đủ số dòng thì cân lại như text-wrap: balance của CSS: thu hẹp bề rộng tới mức nhỏ nhất
+    mà số dòng không tăng, để dòng cuối không trơ một từ.
+    """
+    out = greedy_lines(s, size, width)
+    if 1 < len(out) <= lines:
+        lo, hi = 0.0, float(width)          # ở bề rộng hi, ngắt tham lam luôn ra len(out) dòng
+        while hi - lo > 1:
+            mid = (lo + hi) / 2
+            if len(greedy_lines(s, size, mid)) <= len(out):
+                hi = mid
+            else:
+                lo = mid
+        out = greedy_lines(s, size, hi)
     out = [fit(x, size, width) for x in out]   # một từ dài hơn cả dòng
     if len(out) > lines:
         out = out[:lines]
         out[-1] = ellipsize(out[-1], size, width)
+    return out
+
+
+def chip_topics(name, desc, topics, limit=5):
+    """Chọn tối đa `limit` topic cho hàng chip của ảnh, theo thứ tự hiện trên ảnh.
+
+    topics đến theo thứ tự GitHub trả về: gần như a-b-c, không cho biết topic nào quan trọng hơn. Xếp lại:
+    topic có trong mô tả theo thứ tự đọc, rồi topic chỉ có trong tên repo, rồi phần còn lại theo GitHub;
+    topic mà số là chính (40a, 60a) xuống cuối. Bỏ topic cùng họ với topic đã chọn (homeassistant,
+    esp32-c6, jk-bms). Hàm thuần: cùng đầu vào ra cùng ảnh.
+    """
+    def norm(s):                                    # " home assistant ": so trọn cụm từ, không khớp nửa từ
+        return " " + " ".join(re.findall(r"[^\W_]+", s.lower())) + " "
+
+    text, title = norm(desc), norm(name)
+
+    def rank(item):
+        i, t = item
+        p = norm(t)
+        weak = 3 if sum(c.isdigit() for c in t) * 2 > len(t.replace("-", "")) else 0
+        if p in text:
+            return (weak, text.index(p), i)
+        if p in title:
+            return (weak + 1, title.index(p), i)
+        return (weak + 2, 0, i)
+
+    def kin(a, b):                                  # b ghép từ đầu hay cuối ra a: home-assistant ~ homeassistant
+        a, b = sorted((a.lower(), b.lower()), key=len)
+        la, parts = "".join(re.findall(r"[^\W_]+", a)), re.findall(r"[^\W_]+", b)
+        return any("".join(parts[:k]) == la or "".join(parts[-k:]) == la for k in range(1, len(parts) + 1))
+
+    out = []
+    for _, t in sorted(enumerate(topics), key=rank):
+        if len(out) < limit and not any(kin(t, k) for k in out):
+            out.append(t)
     return out
 
 
@@ -700,11 +754,11 @@ def social_svg(slug, desc, topics):
     body = "".join(f'<text x="{MARGIN}" y="{y0 + i * 54}" font-size="40" fill="#c9d4e5">{esc(t)}</text>'
                    for i, t in enumerate(desc_lines))
     chips, x = [], MARGIN
-    for t in topics[:5]:
+    for t in chip_topics(slug.split("/", 1)[1], desc, topics):
         label_ = fit(t, 24, TEXT_W - 32)
         w = round(32 + text_px(label_, 24))
         if x + w > SOCIAL_W - MARGIN:
-            break
+            continue                        # chip không vừa: thử chip sau, có thể ngắn hơn
         chips.append(f'<rect x="{x}" y="520" width="{w}" height="44" rx="22" fill="#12324a"/>'
                      f'<text x="{x + w / 2}" y="550" font-size="24" fill="#7fd8f5" text-anchor="middle">{esc(label_)}</text>')
         x += w + 12

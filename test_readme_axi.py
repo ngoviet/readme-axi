@@ -415,6 +415,47 @@ class Meta(Base):
         for size, txt in re.findall(r'font-size="(\d+)"[^>]*>([^<]+)</text>', svg):
             self.assertLessEqual(ra.text_px(txt.replace("&amp;", "&"), int(size)), ra.TEXT_W, txt)
 
+    def module(self):
+        spec = importlib.util.spec_from_file_location("ra", CLI)
+        ra = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ra)
+        return ra
+
+    def test_social_description_lines_are_balanced(self):
+        ra = self.module()
+        desc = ("Monitor a Lumentree hybrid solar inverter in Home Assistant: live power, battery, "
+                "grid and energy statistics. HACS.")
+        lines = ra.wrap(desc, 40, ra.TEXT_W, 3)
+        self.assertEqual(" ".join(lines), desc)                                   # không mất chữ
+        self.assertEqual(len(lines), len(ra.greedy_lines(desc, 40, ra.TEXT_W)))   # không thêm dòng
+        px = [ra.text_px(x, 40) for x in lines]
+        self.assertGreater(min(px) / max(px), 0.6, lines)                         # dòng cuối không trơ một từ
+
+    def test_social_chips_are_distinct_topics_of_the_repo(self):
+        ra = self.module()
+        topics = ["bldc", "bluetooth", "esp32", "esp32-c6", "home-assistant", "iot", "matter", "smart-fan",
+                  "smart-home", "esp-idf", "esp-matter", "matter-over-thread", "thread"]
+        desc = "Matter-over-Thread BLDC smart fan on ESP32-C6 (ESP-IDF, ESP-Matter), rotary encoder, works in Home Assistant"
+        chips = ra.chip_topics("esp32-c6-matter-fan", desc, topics)
+        self.assertLessEqual(len(chips), 5)
+        self.assertEqual(len(set(chips)), len(chips))
+        self.assertTrue(set(chips) <= set(topics))
+        self.assertEqual(chips, ra.chip_topics("esp32-c6-matter-fan", desc, topics))  # cùng đầu vào, cùng ảnh
+        self.assertEqual(ra.chip_topics("x", "", []), [])
+        # GitHub xếp gần như a-b-c: 5 topic đầu (bldc, bluetooth, esp32, esp32-c6, home-assistant) thiếu matter
+        self.assertEqual(chips[:2], ["matter", "thread"])                       # theo thứ tự đọc mô tả
+        self.assertNotIn("bluetooth", chips)                                    # không có trong mô tả
+        self.assertFalse({"esp32-c6", "matter-over-thread", "esp-matter"} & set(chips))   # cùng họ esp32, matter
+
+    def test_social_chips_drop_look_alike_and_number_topics(self):
+        ra = self.module()
+        chips = ra.chip_topics("ariston_ha", "Ariston water heater for Home Assistant",
+                               ["ariston", "home-assistant", "homeassistant", "hacs-integration", "hacs"])
+        self.assertEqual(chips, ["ariston", "home-assistant", "hacs-integration"])
+        chips = ra.chip_topics("smartsolar_ha", "Home Assistant integration for MPPT 40A/45A/60A chargers",
+                               ["home-assistant", "40a", "45a", "60a", "mppt", "wifi", "jk-bms", "bms"])
+        self.assertEqual(chips, ["home-assistant", "mppt", "wifi", "jk-bms", "40a"])   # số là chính: xuống cuối
+
     def test_social_out_must_be_png_or_svg_in_an_existing_folder(self):
         self.public_pair()
         self.fake()

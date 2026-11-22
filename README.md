@@ -96,7 +96,9 @@ description, and a `private` marker that disagrees with GitHub. Forks and the pr
 topic, license and preview rules. Without `gh` the command says so and exits 0.
 
 GitHub has no API for the social preview image: `social` renders one (name, description, topics) for
-you to upload in Settings > General > Social preview.
+you to upload in Settings > General > Social preview. GitHub lists topics almost alphabetically, so the
+image shows up to five chosen by the description: topics it mentions come first, in reading order, and
+look-alikes (`homeassistant` next to `home-assistant`) are dropped.
 
 ### Private repositories
 
