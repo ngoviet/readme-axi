@@ -586,5 +586,113 @@ class Drift(Base):
         self.assertEqual(code, 1)
 
 
+def public_pair():
+    en, vi = private_pair()
+    return en.replace(" private -->", " -->"), vi.replace(" private -->", " -->")
+
+
+class CiCommand(Base):
+    """`ci` ghi tệp CI readme đúng loại repo: GitHub Actions cho public, Woodpecker cho private."""
+
+    def test_needs_marker_first(self):
+        code, out = run("ci", self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("scaffold", out)
+
+    def test_public_dry_run_then_write_then_up_to_date(self):
+        self.write(*public_pair())
+        wf = self.root / ".github/workflows/readme.yml"
+        code, out = run("ci", self.root)
+        self.assertEqual(code, 0, out)
+        self.assertIn(".github/workflows/readme.yml,would write", out)
+        self.assertFalse(wf.exists())
+        run("ci", self.root, "--write")
+        self.assertIn("ngoviet/readme-axi/.github/workflows/readme.yml@main", wf.read_text(encoding="utf-8"))
+        code, out = run("ci", self.root, "--write")
+        self.assertIn("up to date", out)
+
+    def test_private_gets_woodpecker_and_custom_file_is_kept(self):
+        self.write(*private_pair())
+        wp = self.root / ".woodpecker/readme.yaml"
+        wp.parent.mkdir()
+        wp.write_text("# tệp tự viết\n", encoding="utf-8")
+        code, out = run("ci", self.root, "--write")
+        self.assertIn(".woodpecker/readme.yaml,\"differs, kept\"", out)
+        self.assertEqual(wp.read_text(encoding="utf-8"), "# tệp tự viết\n")
+        run("ci", self.root, "--write", "--force")
+        self.assertIn("readme_axi.py check", wp.read_text(encoding="utf-8"))
+        self.assertFalse((self.root / ".github").exists())
+
+
+class Hook(Base):
+    """`hook` của Claude Code: chỉ đọc tệp, nhắc một lần mỗi phiên, luôn thoát 0, không bao giờ chặn."""
+
+    def origin(self, url, root=None):
+        g = (root or self.root) / ".git"
+        g.mkdir(exist_ok=True)
+        (g / "config").write_text(f'[core]\n\tbare = false\n[remote "origin"]\n\turl = {url}\n'
+                                  '[branch "main"]\n\tremote = origin\n', encoding="utf-8")
+
+    def hook(self, event, cwd=None, sid="s1", raw=None):
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", TMP=str(self.tmp), TEMP=str(self.tmp), TMPDIR=str(self.tmp))
+        payload = raw if raw is not None else json.dumps({"cwd": str(cwd or self.root), "session_id": sid})
+        r = subprocess.run([sys.executable, str(CLI), "hook", event], input=payload, env=env,
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)    # hook không bao giờ chặn phiên
+        return json.loads(r.stdout) if r.stdout.strip() else None
+
+    def test_silent_outside_scope(self):
+        self.assertIsNone(self.hook("session-start"))                      # không phải repo git
+        self.origin("https://github.com/someone/demo-repo.git")
+        self.assertIsNone(self.hook("session-start"))                      # repo của người khác
+        for name in ("ngoviet", ".github"):                               # repo hồ sơ, repo tệp cộng đồng
+            self.origin(f"git@github.com:ngoviet/{name}.git")
+            self.assertIsNone(self.hook("session-start", sid=name))
+        self.origin("https://github.com/ngoviet/demo-repo.git")
+        (self.root / ".readme-axi-skip").write_text("", encoding="utf-8")
+        self.assertIsNone(self.hook("session-start"))
+
+    def test_reminds_once_per_session_and_never_blocks(self):
+        self.origin("https://github.com/ngoviet/demo-repo.git")
+        (self.root / "src").mkdir()
+        out = self.hook("session-start", cwd=self.root / "src")             # thư mục con: đi lên tìm .git
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertIn("ngoviet/demo-repo", ctx)
+        self.assertIn("scaffold", ctx)
+        self.assertIn("ci ", ctx)
+        self.assertIsNone(self.hook("session-start"))                      # cùng phiên: không nhắc lại
+        self.assertIsNone(self.hook("stop"))                               # đã nhắc lúc mở phiên
+        out = self.hook("stop", sid="s2")                                  # repo vừa vào phạm vi giữa phiên
+        self.assertIn("readme-axi", out["systemMessage"])
+        self.assertNotIn("decision", out)
+        self.assertIsNone(self.hook("stop", sid="s2"))
+        self.assertIsNone(self.hook("stop", sid=""))                       # không có mã phiên: Stop im lặng
+
+    def test_quiet_when_compliant_and_names_only_the_gap(self):
+        self.origin("https://github.com/ngoviet/demo-repo.git")
+        self.write(*private_pair())
+        out = self.hook("session-start")
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("tệp CI readme", ctx)
+        self.assertNotIn("scaffold", ctx)                                  # README đã có: không bảo dựng lại
+        run("ci", self.root, "--write")
+        self.assertIsNone(self.hook("session-start", sid="s3"))
+
+    def test_worktree_reads_origin_from_common_dir(self):
+        common = self.tmp / "main.git"
+        (common / "worktrees" / "wt").mkdir(parents=True)
+        (common / "config").write_text('[remote "origin"]\n\turl = https://github.com/ngoviet/demo-repo.git\n',
+                                       encoding="utf-8")
+        (common / "worktrees" / "wt" / "commondir").write_text("../..\n", encoding="utf-8")
+        (self.root / ".git").write_text(f"gitdir: {(common / 'worktrees' / 'wt').as_posix()}\n", encoding="utf-8")
+        self.assertIsNotNone(self.hook("session-start"))
+
+    def test_bad_input_is_silent(self):
+        self.origin("https://github.com/ngoviet/demo-repo.git")
+        self.assertIsNone(self.hook("session-start", raw="không phải JSON"))
+        self.assertIsNone(self.hook("lạ"))
+
+
 if __name__ == "__main__":
     unittest.main()

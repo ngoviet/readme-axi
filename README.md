@@ -29,6 +29,8 @@ python3 readme_axi.py social [dir]           # render a 1280x640 social preview 
 python3 readme_axi.py support [dir] --write  # insert/refresh the shared "Support the project" block
 python3 readme_axi.py scaffold --type ha --title "Name for Home Assistant"
 python3 readme_axi.py scaffold --type ops --title "nas" --private   # private repo skeleton
+python3 readme_axi.py ci [dir] --write       # add the README CI file: GitHub Actions (public), Woodpecker (private)
+python3 readme_axi.py hook session-start     # Claude Code hook, reads the session JSON on stdin
 python3 readme_axi.py names                  # canonical section names EN -> VI and required order
 ```
 
@@ -159,6 +161,25 @@ steps:
 
 `main` of this public repository is the published copy, so the download needs no token. CI everywhere
 runs that file: a change reaches every repository as soon as it lands on `main`.
+
+`readme_axi.py ci --write` writes the right one of these two files, chosen by the `private` flag in the
+marker. It keeps an existing file that differs from the template unless you add `--force`.
+
+### Claude Code hook
+
+`hook` reminds Claude Code when the repository it works in belongs to `ngoviet` (set
+`READMEAXI_OWNER` for another owner) and still lacks the marker, `README.vi.md` or the CI file. It reads
+files only, with no git and no network, always exits 0 and never blocks. SessionStart adds the reminder to
+the session; Stop shows it once to the user when the repository entered scope mid-session. Each
+repository is named at most once per session. The profile repository, `.github` and any repository with
+a `.readme-axi-skip` file at its root are left alone.
+
+```json
+"hooks": {
+  "SessionStart": [{"hooks": [{"type": "command", "command": "python /path/to/readme_axi.py hook session-start"}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "python /path/to/readme_axi.py hook stop"}]}]
+}
+```
 
 ## Development
 

@@ -8,6 +8,8 @@ Lệnh:
   readme_axi.py social [dir] [--repo owner/name] [--out f]  vẽ ảnh social preview 1280x640 (SVG, PNG khi có Edge/Chrome)
   readme_axi.py support [dir] [--repo name] [--write]       chèn/thay khối Ủng hộ chung (mặc định chỉ xem)
   readme_axi.py scaffold [dir] --type T --title "..." [--private] [--repo name] [--force]
+  readme_axi.py ci [dir] [--write] [--force]                tệp CI readme: GitHub Actions (public), Woodpecker (private)
+  readme_axi.py hook session-start|stop                     hook Claude Code: nhắc khi repo chưa theo khung (đọc stdin)
   readme_axi.py names                                       tên mục chuẩn, mục bắt buộc theo loại
 Loại T: ha, card, esp32, tool, app, ops, config, docs.
 Repo private: dấu <!-- readme-axi type=T private --> (vẫn song ngữ, không bắt khối Ủng hộ và mục License).
@@ -22,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from bisect import bisect_right
 from pathlib import Path
 from urllib.parse import unquote
@@ -988,6 +991,188 @@ def cmd_names():
     return 0
 
 
+# ---------- ci ----------
+# Repo public: gọi workflow dùng chung của readme-axi trên GitHub Actions.
+# Repo private: Woodpecker tự host (GitHub Actions của repo private không còn phút chạy).
+
+CI_PUBLIC = """name: README
+
+on:
+  push:
+    paths: [README.md, README.vi.md]
+  pull_request:
+    paths: [README.md, README.vi.md]
+
+jobs:
+  readme:
+    uses: ngoviet/readme-axi/.github/workflows/readme.yml@main
+"""
+
+CI_PRIVATE = """# Kiểm README song ngữ bằng readme-axi (https://github.com/ngoviet/readme-axi).
+# Repo private nên chạy trên Woodpecker tự host, không dùng GitHub Actions.
+
+when:
+  - event: pull_request
+    path: [README.md, README.vi.md, .woodpecker/readme.yaml]
+  - event: push
+    branch: main
+    path: [README.md, README.vi.md, .woodpecker/readme.yaml]
+  - event: manual
+
+clone:
+  - name: clone
+    image: woodpeckerci/plugin-git
+    settings:
+      partial: false # drift đọc lịch sử git: clone đủ, không shallow
+      depth: 0
+
+steps:
+  - name: readme
+    image: python:3.13-bookworm # có sẵn python3, git, curl
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - curl -fsSL https://raw.githubusercontent.com/ngoviet/readme-axi/main/readme_axi.py -o /tmp/readme_axi.py
+      - python3 /tmp/readme_axi.py check
+      - python3 /tmp/readme_axi.py drift
+"""
+
+
+def cmd_ci(root, write=False, force=False):
+    en = root / EN
+    if not en.exists() or not marker(read(en))[0]:
+        die("README.md chưa có dòng <!-- readme-axi type=... -->: chưa biết repo public hay private", 1,
+            'Run `readme_axi.py scaffold --type T --title "..."` first (add --private for a private repo)')
+    private = is_private(root)
+    rel, body = (".woodpecker/readme.yaml", CI_PRIVATE) if private else (".github/workflows/readme.yml", CI_PUBLIC)
+    target = root / rel
+    current = read(target) if target.exists() else None
+    if current == body:
+        action = "up to date"
+    elif current is not None and not force:
+        action = "differs, kept"
+    elif write:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body.encode("utf-8"))
+        action = "written"
+    else:
+        action = "would write"
+    print(f"visibility: {'private' if private else 'public'}")
+    print("\n".join(table("ci", ["file", "action"], [{"file": rel, "action": action}])))
+    hints = []
+    if action == "would write":
+        hints.append("Pass --write to create the file")
+    if action == "differs, kept":
+        hints.append("The file differs from the shared template; pass --write --force to replace it")
+    if action in ("written", "up to date"):
+        hints.append("Enable the repo in your Woodpecker server: a private repo has CI only once enabled there"
+                     if private else "Commit and push: GitHub Actions runs the shared readme-axi workflow")
+    print(f"help[{len(hints)}]:\n  " + "\n  ".join(hints))
+    return 0
+
+
+# ---------- hook ----------
+# Claude Code (settings.json) gọi `readme_axi.py hook session-start` và `hook stop`, đưa JSON của phiên qua stdin.
+# Repo đang làm là repo của HOOK_OWNER mà chưa theo khung thì nhắc, mỗi phiên một lần cho mỗi repo.
+# Chỉ đọc tệp (không gọi git, không mạng). Luôn thoát 0 và không bao giờ chặn: với Stop, mã thoát 2 sẽ giữ phiên lại.
+
+HOOK_OWNER = os.environ.get("READMEAXI_OWNER", "ngoviet")
+SKIP_FILE = ".readme-axi-skip"          # đặt ở gốc repo không cần theo khung
+
+
+def git_dirs(start):
+    """(gốc repo, thư mục .git chứa config) đi lên từ start, hoặc (None, None). Hiểu worktree (.git là tệp)."""
+    for d in (start, *start.parents):
+        g = d / ".git"
+        if g.is_dir():
+            return d, g
+        if g.is_file():
+            m = re.match(r"gitdir:\s*(.+)", read(g).strip())
+            if not m:
+                return None, None
+            gd = (d / m.group(1).strip()).resolve()
+            common = gd / "commondir"
+            return d, ((gd / read(common).strip()).resolve() if common.exists() else gd)
+    return None, None
+
+
+def config_origin(gitdir):
+    """URL của remote origin đọc thẳng trong .git/config, hoặc ''."""
+    cfg, sect = gitdir / "config", None
+    if not cfg.exists():
+        return ""
+    for line in read(cfg).splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            sect = s
+        elif sect == '[remote "origin"]' and re.match(r"url\s*=", s):
+            return s.split("=", 1)[1].strip()
+    return ""
+
+
+def hook_gaps(root):
+    """Những gì repo còn thiếu so với khung readme-axi; rỗng là đạt."""
+    gaps, en = [], root / EN
+    if not en.exists():
+        gaps.append("README.md")
+    elif not marker(read(en))[0]:
+        gaps.append("dòng <!-- readme-axi type=... --> trong README.md")
+    if not (root / VI).exists():
+        gaps.append("README.vi.md")
+    if not any(re.search("readme", p.name, re.I) for d in (".github/workflows", ".woodpecker")
+               if (root / d).is_dir() for p in (root / d).iterdir()):
+        gaps.append("tệp CI readme")
+    return gaps
+
+
+def cmd_hook(event):
+    if event not in ("session-start", "stop"):
+        print(f"readme-axi hook: sự kiện lạ {event!r}, cần session-start hoặc stop", file=sys.stderr)
+        return 0
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+        root, gitdir = git_dirs(Path(data.get("cwd") or os.getcwd()).resolve())
+        if not root:
+            return 0
+        m = re.search(r"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", config_origin(gitdir))
+        if not m or m.group(1).lower() != HOOK_OWNER.lower():
+            return 0
+        owner, name = m.group(1), m.group(2)
+        if name.lower() in (owner.lower(), ".github") or (root / SKIP_FILE).exists():
+            return 0
+        gaps = hook_gaps(root)
+        sid = re.sub(r"[^\w-]", "", str(data.get("session_id", "")))
+        if not gaps or (event == "stop" and not sid):
+            return 0
+        state = Path(tempfile.gettempdir()) / "readme-axi-hook" / f"{sid}.json"
+        seen = set(json.loads(read(state))) if sid and state.exists() else set()
+        key = str(root)
+        if key in seen:
+            return 0
+        if sid:
+            state.parent.mkdir(exist_ok=True)
+            state.write_text(json.dumps(sorted(seen | {key})), encoding="utf-8")
+        tool = Path(__file__).resolve().as_posix()
+        here = root.as_posix()
+        steps = ([f'`python {tool} scaffold {here} --type <loại> --title "<tên>"` (thêm --private nếu repo private), '
+                  "rồi viết nội dung thật thay chữ mẫu"] if "README.md" in gaps
+                 else [f"sửa README theo `python {tool} check {here}`"] if any("README" in g for g in gaps) else [])
+        if "tệp CI readme" in gaps:
+            steps.append(f"`python {tool} ci {here} --write` (repo private: bật repo trong Woodpecker)")
+        what = "; ".join(gaps)
+        if event == "session-start":
+            msg = (f"readme-axi: repo {owner}/{name} chưa theo khung README chung của {owner}, còn thiếu: {what}. "
+                   f"Khi làm việc trong repo này, đề xuất với chủ trước khi sửa: {'; '.join(steps)}. "
+                   f"Repo không cần theo khung thì tạo tệp {SKIP_FILE} ở gốc repo.")
+            out = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}
+        else:
+            out = {"systemMessage": f"readme-axi: {owner}/{name} chưa theo khung README chung (thiếu: {what}). "
+                                    f"Nhờ Claude sửa, hoặc tạo tệp {SKIP_FILE} nếu repo không cần theo khung."}
+        sys.stdout.write(json.dumps(out) + "\n")   # \uXXXX: không phụ thuộc bảng mã stdout (cp1252 trên Windows)
+    except Exception:  # noqa: BLE001 — hook không được làm hỏng phiên
+        return 0
+    return 0
+
+
 def main(argv):
     if "--version" in argv:
         print(f"readme-axi {VERSION}")
@@ -995,9 +1180,11 @@ def main(argv):
     if "--help" in argv or "-h" in argv:
         print(__doc__.strip())
         return 0
-    cmds = {"check", "drift", "meta", "social", "support", "scaffold", "names"}
+    cmds = {"check", "drift", "meta", "social", "support", "scaffold", "ci", "hook", "names"}
     cmd = argv[0] if argv and argv[0] in cmds else "check"
     rest = argv[1:] if argv and argv[0] in cmds else argv
+    if cmd == "hook":                 # trước khi đọc thư mục: tham số là tên sự kiện, không phải đường dẫn
+        return cmd_hook(rest[0] if rest else "")
     opts, pos, i = {}, [], 0
     flags = {"--type", "--title", "--repo", "--out"}
     bools = {"--write", "--force", "--strict", "--private"}
@@ -1029,6 +1216,8 @@ def main(argv):
         return cmd_drift(root, opts.get("--strict", False))
     if cmd == "names":
         return cmd_names()
+    if cmd == "ci":
+        return cmd_ci(root, opts.get("--write", False), opts.get("--force", False))
     if cmd in ("meta", "social"):
         slug, own = opts.get("--repo"), repo_slug(root)
         if slug and "/" not in slug:  # chỉ tên: lấy chủ repo từ origin

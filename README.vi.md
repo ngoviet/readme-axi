@@ -29,6 +29,8 @@ python3 readme_axi.py social [dir]           # vẽ ảnh social preview 1280x64
 python3 readme_axi.py support [dir] --write  # chèn/làm mới khối "Ủng hộ dự án" dùng chung
 python3 readme_axi.py scaffold --type ha --title "Name for Home Assistant"
 python3 readme_axi.py scaffold --type ops --title "nas" --private   # khung cho repo private
+python3 readme_axi.py ci [dir] --write       # thêm tệp CI readme: GitHub Actions (public), Woodpecker (private)
+python3 readme_axi.py hook session-start     # hook cho Claude Code, đọc JSON của phiên qua stdin
 python3 readme_axi.py names                  # tên mục chuẩn Anh -> Việt và thứ tự bắt buộc
 ```
 
@@ -157,6 +159,24 @@ steps:
 
 Nhánh `main` của repo public này là bản phát hành, nên tải về không cần token. CI mọi nơi chạy đúng tệp
 đó: thay đổi tới mọi repo ngay khi vào `main`.
+
+`readme_axi.py ci --write` ghi đúng một trong hai tệp trên, chọn theo cờ `private` trong dòng đánh dấu.
+Tệp đã có mà khác mẫu thì được giữ nguyên, trừ khi thêm `--force`.
+
+### Hook cho Claude Code
+
+`hook` nhắc Claude Code khi repo đang làm thuộc `ngoviet` (đặt `READMEAXI_OWNER` cho chủ khác) mà còn
+thiếu dòng đánh dấu, `README.vi.md` hay tệp CI. Lệnh chỉ đọc tệp, không gọi git hay mạng, luôn thoát 0 và
+không bao giờ chặn. SessionStart thêm lời nhắc vào phiên; Stop báo một lần cho người dùng khi repo vào
+phạm vi giữa phiên. Mỗi repo được nhắc nhiều nhất một lần mỗi phiên. Repo hồ sơ, `.github` và repo có tệp
+`.readme-axi-skip` ở gốc được bỏ qua.
+
+```json
+"hooks": {
+  "SessionStart": [{"hooks": [{"type": "command", "command": "python /path/to/readme_axi.py hook session-start"}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "python /path/to/readme_axi.py hook stop"}]}]
+}
+```
 
 ## Phát triển
 
