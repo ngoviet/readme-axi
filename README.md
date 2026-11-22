@@ -168,8 +168,10 @@ marker. It keeps an existing file that differs from the template unless you add 
 ### Claude Code hook
 
 `hook` reminds Claude Code when the repository it works in belongs to `ngoviet` (set
-`READMEAXI_OWNER` for another owner) and still lacks the marker, `README.vi.md` or the CI file. It reads
-files only, with no git and no network, always exits 0 and never blocks. SessionStart adds the reminder to
+`READMEAXI_OWNER` for another owner) and still lacks the marker, `README.vi.md` or the CI file. When the
+working tree lacks something, it compares with the default branch as last fetched (`origin/HEAD`), so a
+stale clone or an old feature branch is not flagged when `main` already complies. It uses local git only,
+no network, always exits 0 and never blocks. SessionStart adds the reminder to
 the session; Stop shows it once to the user when the repository entered scope mid-session. Each
 repository is named at most once per session. The profile repository, `.github` and any repository with
 a `.readme-axi-skip` file at its root are left alone.

@@ -1073,7 +1073,8 @@ def cmd_ci(root, write=False, force=False):
 # ---------- hook ----------
 # Claude Code (settings.json) gọi `readme_axi.py hook session-start` và `hook stop`, đưa JSON của phiên qua stdin.
 # Repo đang làm là repo của HOOK_OWNER mà chưa theo khung thì nhắc, mỗi phiên một lần cho mỗi repo.
-# Chỉ đọc tệp (không gọi git, không mạng). Luôn thoát 0 và không bao giờ chặn: với Stop, mã thoát 2 sẽ giữ phiên lại.
+# Không mạng. Đọc tệp; chỉ khi thư mục làm việc còn thiếu mới gọi git cục bộ để so với nhánh chính đã fetch.
+# Luôn thoát 0 và không bao giờ chặn: với Stop, mã thoát 2 sẽ giữ phiên lại.
 
 HOOK_OWNER = os.environ.get("READMEAXI_OWNER", "ngoviet")
 SKIP_FILE = ".readme-axi-skip"          # đặt ở gốc repo không cần theo khung
@@ -1109,19 +1110,49 @@ def config_origin(gitdir):
     return ""
 
 
-def hook_gaps(root):
-    """Những gì repo còn thiếu so với khung readme-axi; rỗng là đạt."""
-    gaps, en = [], root / EN
-    if not en.exists():
+CI_FILE_RE = re.compile(r"^(\.github/workflows|\.woodpecker)/[^/]*readme[^/]*$", re.I)
+
+
+def gaps_of(files, en_text):
+    """Những gì còn thiếu so với khung readme-axi, từ tập tệp (đường dẫn posix) và nội dung README.md; rỗng là đạt."""
+    gaps = []
+    if en_text is None:
         gaps.append("README.md")
-    elif not marker(read(en))[0]:
+    elif not marker(en_text)[0]:
         gaps.append("dòng <!-- readme-axi type=... --> trong README.md")
-    if not (root / VI).exists():
+    if VI not in files:
         gaps.append("README.vi.md")
-    if not any(re.search("readme", p.name, re.I) for d in (".github/workflows", ".woodpecker")
-               if (root / d).is_dir() for p in (root / d).iterdir()):
+    if not any(CI_FILE_RE.match(f) for f in files):
         gaps.append("tệp CI readme")
     return gaps
+
+
+def hook_gaps(root):
+    """Thiếu gì ở thư mục làm việc."""
+    files = {p.relative_to(root).as_posix() for d in (".github/workflows", ".woodpecker") if (root / d).is_dir()
+             for p in (root / d).iterdir()}
+    files |= {f for f in (EN, VI) if (root / f).exists()}
+    return gaps_of(files, read(root / EN) if (root / EN).exists() else None)
+
+
+def upstream_gaps(root):
+    """Thiếu gì ở nhánh chính đã fetch gần nhất (origin/HEAD, rồi origin/main, origin/master); None khi không có.
+
+    Bản clone chậm hay đang ở nhánh tính năng cũ thì thư mục làm việc thiếu README.vi.md, tệp CI dù nhánh chính đã có:
+    khi đó không được bảo dựng lại. Chỉ gọi git cục bộ, không mạng.
+    """
+    def git(*a):
+        r = subprocess.run(["git", "-C", str(root), *a], capture_output=True, timeout=3)
+        return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
+        # chỉ các đường dẫn cần xem, không cả cây: repo lớn vẫn nhanh
+        listing = git("ls-tree", "-r", "--name-only", ref, "--", EN, VI, ".github/workflows", ".woodpecker")
+        if listing is not None:
+            files = set(listing.splitlines())
+            en = git("show", f"{ref}:{EN}") if EN in files else None
+            return gaps_of(files, en.replace("\r\n", "\n") if en is not None else None)
+    return None
 
 
 def cmd_hook(event):
@@ -1129,7 +1160,8 @@ def cmd_hook(event):
         print(f"readme-axi hook: sự kiện lạ {event!r}, cần session-start hoặc stop", file=sys.stderr)
         return 0
     try:
-        data = json.loads(sys.stdin.read() or "{}")
+        # đọc byte rồi giải UTF-8: sys.stdin dùng bảng mã máy (cp1252 trên Windows), hỏng với đường dẫn tiếng Việt
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
         root, gitdir = git_dirs(Path(data.get("cwd") or os.getcwd()).resolve())
         if not root:
             return 0
@@ -1143,6 +1175,11 @@ def cmd_hook(event):
         sid = re.sub(r"[^\w-]", "", str(data.get("session_id", "")))
         if not gaps or (event == "stop" and not sid):
             return 0
+        up = upstream_gaps(root)
+        if up is not None:
+            gaps = [g for g in gaps if g in up]      # nhánh chính đã có thì chỉ là bản ở máy chậm: không nhắc
+            if not gaps:
+                return 0
         state = Path(tempfile.gettempdir()) / "readme-axi-hook" / f"{sid}.json"
         seen = set(json.loads(read(state))) if sid and state.exists() else set()
         key = str(root)

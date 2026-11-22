@@ -688,6 +688,36 @@ class Hook(Base):
         (self.root / ".git").write_text(f"gitdir: {(common / 'worktrees' / 'wt').as_posix()}\n", encoding="utf-8")
         self.assertIsNotNone(self.hook("session-start"))
 
+    def test_stale_clone_is_judged_by_the_default_branch(self):
+        # bản ở máy chậm (nhánh cũ) thiếu README.vi.md và tệp CI, nhưng origin/main đã có: không được nhắc dựng lại
+        git(self.root, "init", "-q")
+        git(self.root, "remote", "add", "origin", "https://github.com/ngoviet/demo-repo.git")
+        (self.root / "a.txt").write_text("a", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "đầu")
+        self.write(*private_pair())
+        run("ci", self.root, "--write")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "khung readme-axi")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.root, "checkout", "-q", "HEAD~1")
+        self.assertIsNone(self.hook("session-start", sid="cu"))
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")    # nhánh chính cũng chưa có: phải nhắc
+        out = self.hook("session-start", sid="cu2")
+        self.assertIn("README.vi.md", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_utf8_payload_without_pythonioencoding(self):
+        # Claude Code gửi JSON bằng UTF-8 và không đặt PYTHONIOENCODING: thư mục có chữ tiếng Việt vẫn phải đọc được
+        root = self.tmp / "dự-án-ờ"
+        root.mkdir()
+        self.origin("https://github.com/ngoviet/du-an.git", root=root)
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+        env.update(TMP=str(self.tmp), TEMP=str(self.tmp), TMPDIR=str(self.tmp))
+        payload = json.dumps({"cwd": str(root), "session_id": "vi"}, ensure_ascii=False).encode("utf-8")
+        r = subprocess.run([sys.executable, str(CLI), "hook", "session-start"], input=payload, env=env, capture_output=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("ngoviet/du-an", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
+
     def test_bad_input_is_silent(self):
         self.origin("https://github.com/ngoviet/demo-repo.git")
         self.assertIsNone(self.hook("session-start", raw="không phải JSON"))

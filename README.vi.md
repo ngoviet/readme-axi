@@ -166,8 +166,10 @@ Tệp đã có mà khác mẫu thì được giữ nguyên, trừ khi thêm `--f
 ### Hook cho Claude Code
 
 `hook` nhắc Claude Code khi repo đang làm thuộc `ngoviet` (đặt `READMEAXI_OWNER` cho chủ khác) mà còn
-thiếu dòng đánh dấu, `README.vi.md` hay tệp CI. Lệnh chỉ đọc tệp, không gọi git hay mạng, luôn thoát 0 và
-không bao giờ chặn. SessionStart thêm lời nhắc vào phiên; Stop báo một lần cho người dùng khi repo vào
+thiếu dòng đánh dấu, `README.vi.md` hay tệp CI. Thư mục làm việc còn thiếu thì lệnh so tiếp với nhánh
+chính đã fetch gần nhất (`origin/HEAD`), nên bản clone chậm hay nhánh tính năng cũ không bị nhắc khi `main`
+đã đạt. Lệnh chỉ dùng git cục bộ, không mạng, luôn thoát 0 và không bao giờ chặn. SessionStart thêm lời
+nhắc vào phiên; Stop báo một lần cho người dùng khi repo vào
 phạm vi giữa phiên. Mỗi repo được nhắc nhiều nhất một lần mỗi phiên. Repo hồ sơ, `.github` và repo có tệp
 `.readme-axi-skip` ở gốc được bỏ qua.
 
