@@ -29,7 +29,7 @@ from bisect import bisect_right
 from pathlib import Path
 from urllib.parse import unquote
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 EN, VI = "README.md", "README.vi.md"
 SWITCH_EN = "**English** · [Tiếng Việt](README.vi.md)"
 SWITCH_VI = "[English](README.md) · **Tiếng Việt**"

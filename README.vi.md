@@ -187,6 +187,10 @@ python3 -m unittest discover -s . -v
 Test chạy CLI trên các README tạm (và repo git tạm cho `drift` và phần lấy tên repo). Chính README này
 cũng được kiểm: `python3 readme_axi.py check` phải đạt trước khi commit.
 
+Muốn phát hành thì tăng `VERSION` trong `readme_axi.py` rồi đẩy tag `vX.Y.Z`. Workflow release kiểm tag
+khớp `VERSION`, chạy test rồi tạo release trên GitHub. Các repo vẫn tải `main`, nên tag là bản ghi lịch
+sử, không phải bản được ghim: muốn quay lại bản trước thì revert trên `main`.
+
 <!-- support:start -->
 ## Ủng hộ dự án
 

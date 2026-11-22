@@ -1,0 +1,32 @@
+# Phát hành readme-axi khi đẩy tag vX.Y.Z. Các repo vẫn tải readme_axi.py từ main: tag là lịch sử phát hành,
+# không phải bản các repo dùng. Muốn quay lại bản trước thì revert trên main.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag khớp VERSION trong readme_axi.py
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          VER="$(python3 readme_axi.py --version | awk '{print $2}')"
+          if [ "$TAG" != "$VER" ]; then echo "Tag v$TAG khác VERSION $VER"; exit 1; fi
+      - name: Test
+        run: python3 -m unittest discover -s . -v
+      - name: README của chính repo
+        run: python3 readme_axi.py check && python3 readme_axi.py drift
+      - name: Tạo release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

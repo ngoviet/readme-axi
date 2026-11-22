@@ -190,6 +190,10 @@ python3 -m unittest discover -s . -v
 The tests run the CLI on temporary READMEs (and temporary git repositories for `drift` and the
 repository name). This README is itself checked: `python3 readme_axi.py check` must pass before a commit.
 
+To release, bump `VERSION` in `readme_axi.py` and push the tag `vX.Y.Z`. The release workflow checks that
+the tag matches `VERSION`, runs the tests and publishes a GitHub release. Repositories keep downloading
+`main`, so a tag is a record, not a pin: to roll back, revert on `main`.
+
 <!-- support:start -->
 ## Support the project
 
