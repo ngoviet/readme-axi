@@ -119,9 +119,9 @@ Mỗi repo public gọi workflow dùng chung trong repo này (GitHub Actions):
 name: README
 on:
   push:
-    paths: [README.md, README.vi.md]
+    paths: [README.md, README.vi.md, .github/workflows/readme.yml]
   pull_request:
-    paths: [README.md, README.vi.md]
+    paths: [README.md, README.vi.md, .github/workflows/readme.yml]
 jobs:
   readme:
     uses: ngoviet/readme-axi/.github/workflows/readme.yml@main

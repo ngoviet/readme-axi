@@ -999,9 +999,9 @@ CI_PUBLIC = """name: README
 
 on:
   push:
-    paths: [README.md, README.vi.md]
+    paths: [README.md, README.vi.md, .github/workflows/readme.yml]
   pull_request:
-    paths: [README.md, README.vi.md]
+    paths: [README.md, README.vi.md, .github/workflows/readme.yml]
 
 jobs:
   readme:

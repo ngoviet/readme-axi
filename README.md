@@ -121,9 +121,9 @@ Each public repository calls the reusable workflow in this repository (GitHub Ac
 name: README
 on:
   push:
-    paths: [README.md, README.vi.md]
+    paths: [README.md, README.vi.md, .github/workflows/readme.yml]
   pull_request:
-    paths: [README.md, README.vi.md]
+    paths: [README.md, README.vi.md, .github/workflows/readme.yml]
 jobs:
   readme:
     uses: ngoviet/readme-axi/.github/workflows/readme.yml@main
